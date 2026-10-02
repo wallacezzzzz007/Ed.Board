@@ -1,0 +1,5 @@
+# Keep the app offset and size stable for updates; persistent configuration follows the app.
+# Name, Type, SubType, Offset, Size, Flags
+factory, app, factory, 0x20000, 0x200000,
+edboard, data, nvs, 0x220000, 0x6000,
+edboard_ble, data, nvs, 0x226000, 0x10000,

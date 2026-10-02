@@ -1,0 +1,11 @@
+cmake_minimum_required(VERSION 3.16)
+set(PROJECT_VER "0.5.0")
+include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+project(edboard_codex_probe)
+if(NOT CONFIG_PARTITION_TABLE_CUSTOM_FILENAME STREQUAL "partitions.csv")
+    message(FATAL_ERROR "Ed.Board 3A requires usb-probe/partitions.csv; check prepare_sdkconfig.py migration")
+endif()
+
+if(NOT CONFIG_TINYUSB_CDC_RX_BUFSIZE EQUAL 8192)
+    message(FATAL_ERROR "Ed.Board requires a 8192-byte CDC RX buffer; check prepare_sdkconfig.py")
+endif()

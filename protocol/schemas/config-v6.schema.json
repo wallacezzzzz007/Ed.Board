@@ -1,0 +1,320 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Ed.Board lighting and chord configuration v5",
+  "description": "Schema 6: 25 controls. Runtime validation additionally requires native bindings for Codex controls 13\u201324; ordinary controls 13\u201324 cannot be native or inherit Codex. Cancel only on joystick controls 16\u201319 and 21\u201324.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "layers"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 6
+    },
+    "layers": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "mode",
+          "color",
+          "ringColor",
+          "brightness",
+          "bindings"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 255
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48,
+            "description": "Additional runtime validation: <=48 UTF-8 bytes, no ASCII controls."
+          },
+          "mode": {
+            "enum": [
+              "native",
+              "custom"
+            ]
+          },
+          "color": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 16777215
+          },
+          "ringColor": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 16777215
+          },
+          "brightness": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "bindings": {
+            "type": "array",
+            "minItems": 25,
+            "maxItems": 25,
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "usage",
+                    "modifiers",
+                    "source"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "enum": [
+                        "native",
+                        "disabled",
+                        "cancel"
+                      ]
+                    },
+                    "usage": {
+                      "const": 0
+                    },
+                    "modifiers": {
+                      "const": 0
+                    },
+                    "source": {
+                      "const": 0
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "usage",
+                    "modifiers",
+                    "source"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "const": "shortcut"
+                    },
+                    "usage": {
+                      "type": "integer",
+                      "minimum": 4,
+                      "maximum": 115
+                    },
+                    "modifiers": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 15
+                    },
+                    "source": {
+                      "const": 0
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "usage",
+                    "modifiers",
+                    "source"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "const": "inherit"
+                    },
+                    "usage": {
+                      "const": 0
+                    },
+                    "modifiers": {
+                      "const": 0
+                    },
+                    "source": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 255
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "usage",
+                    "modifiers",
+                    "source"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "enum": [
+                        "application",
+                        "open",
+                        "text"
+                      ]
+                    },
+                    "usage": {
+                      "const": 0
+                    },
+                    "modifiers": {
+                      "const": 0
+                    },
+                    "source": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 2147483647
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "usage",
+                    "modifiers",
+                    "source",
+                    "keys"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "const": "shortcut"
+                    },
+                    "usage": {
+                      "const": 0
+                    },
+                    "modifiers": {
+                      "const": 0
+                    },
+                    "source": {
+                      "const": 0
+                    },
+                    "keys": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 14,
+                      "uniqueItems": true,
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": 4,
+                            "maximum": 164
+                          },
+                          {
+                            "type": "integer",
+                            "minimum": 224,
+                            "maximum": 231
+                          }
+                        ]
+                      },
+                      "description": "Runtime also enforces at most six non-modifier keys."
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "effects": {
+            "type": "array",
+            "minItems": 5,
+            "maxItems": 5,
+            "prefixItems": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4
+              },
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100
+              },
+              {
+                "enum": [
+                  0,
+                  1,
+                  3,
+                  4,
+                  5
+                ]
+              },
+              {
+                "type": "integer",
+                "minimum": -1,
+                "maximum": 100
+              },
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100
+              }
+            ],
+            "items": false
+          },
+          "keyLights": {
+            "type": "array",
+            "minItems": 13,
+            "maxItems": 13,
+            "items": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "array",
+                  "minItems": 4,
+                  "maxItems": 4,
+                  "prefixItems": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 4
+                    },
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 16777215
+                    },
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100
+                    },
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100
+                    }
+                  ],
+                  "items": false
+                }
+              ]
+            }
+          }
+        },
+        "dependentRequired": {
+          "effects": [
+            "keyLights"
+          ],
+          "keyLights": [
+            "effects"
+          ]
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,29 @@
+# Private maintenance, research, migration archives and local test results
+/docs/
+/private/
+/test-results/
+/AGENTS.md
+/Ed.Board.code-workspace
+/research/
+/output/
+/app/LocalSettings/
+
+# Reproducible development outputs
+.DS_Store
+**/.pio/
+**/.build/
+**/DerivedData/
+**/managed_components/
+**/xcuserdata/
+*.xcuserstate
+__pycache__/
+*.pyc
+/firmware/usb-probe/build/
+/firmware/usb-probe/sdkconfig
+/firmware/usb-probe/sdkconfig.*
+!/firmware/usb-probe/sdkconfig.defaults
+
+# Generated updater and firmware resources, rebuilt for distribution
+/app/EdBoard/Resources/Firmware/
+/app/EdBoard/Resources/Firmware.previous/
+/app/EdBoard/Resources/.firmware-stage-*/
