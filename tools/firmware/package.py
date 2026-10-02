@@ -10,7 +10,7 @@ import venv
 from updater import validate_package
 
 ROOT = Path(__file__).resolve().parents[2]
-VERSION = '0.5.0'
+VERSION = '0.5.1'
 
 
 

@@ -129,7 +129,11 @@ final class AppLog: ObservableObject, @unchecked Sendable {
                 return pieces.count == 2 ? (String(pieces[0]), String(pieces[1])) : nil
             }
             let allowed: Set<String> = ["ms", "event", "seq", "at_ms", "kind", "a", "b", "c", "lost", "ready", "fault", "armed", "input_drops", "rpc_errors", "light_fault", "management_errors", "tx_failures", "parse_errors", "log_drops", "storage_ok"]
-            let safe = fields.filter { allowed.contains($0.0) }.map { "\($0.0)=\($0.1)" }.joined(separator: " ")
+            let faultDetail = fields.contains { $0.0 == "event" && $0.1 == "input_fault_detail" }
+            let faultNumbers: Set<String> = ["x", "y", "touch", "x_span", "y_span", "touch_span", "adc_x_error", "adc_y_error", "touch_error", "raw_touch"]
+            let safe = fields.filter { allowed.contains($0.0) || (faultDetail &&
+                ((faultNumbers.contains($0.0) && Int64($0.1) != nil) ||
+                 ($0.0 == "reason" && ["calibration_failed", "sensor_read_failed"].contains($0.1)))) }.map { "\($0.0)=\($0.1)" }.joined(separator: " ")
             detail("firmware \(safe)")
             let faults: Set<String> = ["fault", "input_drops", "rpc_errors", "light_fault", "management_errors", "tx_failures", "parse_errors"]
             let health = fields.filter { faults.contains($0.0) && $0.1 != "0" }.map { "\($0.0)=\($0.1)" }.joined(separator: " ")

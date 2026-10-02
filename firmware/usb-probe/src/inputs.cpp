@@ -1,6 +1,7 @@
 // Input scanning and startup calibration for AI Micro Board3.
 // Battery conversion adapted from AI Micro Basic (MIT); see vendor/LICENSE.
 #include "inputs.hpp"
+#include "input_calibration.hpp"
 #include <atomic>
 #include "esp_adc/adc_cali_scheme.h"
 #include <cinttypes>
@@ -109,10 +110,8 @@ void input_task(void *) {
     uint32_t sequence = 0;
     int64_t next_battery = 0;
     int64_t next_sample = 0, next_report = 0;
-    int samples = 0, sum_x = 0, sum_y = 0;
-    uint64_t sum_touch = 0;
-    int min_x = 4095, max_x = 0, min_y = 4095, max_y = 0;
-    uint32_t min_touch = UINT32_MAX, max_touch = 0;
+    InputCalibration calibration;
+    bool calibration_controls_released = true;
     int center_x = 0, center_y = 0;
     uint32_t baseline = 0;
     bool calibrated = false;
@@ -126,16 +125,19 @@ void input_task(void *) {
         const int64_t now = esp_timer_get_time();
         const uint16_t raw = read_panel();
         uint16_t mask = 0;bool changed[14]{};
+        bool raw_released = true;
         for (unsigned i = 0; i < 14; ++i) {
             const bool pressed = i < 13 ? !(raw & (1U << kBits[i])) : !gpio_get_level(kPush);
+            raw_released = raw_released && !pressed;
             changed[i]=keys[i].update(pressed, now);
             if (keys[i].stable) { mask |= 1U << i; }
         }
         // Publish the whole scan state before waking the event consumer.
         portENTER_CRITICAL(&snapshot_lock);
-        snapshot.preview_pressed |= mask & ~snapshot.keys; snapshot.keys=mask; snapshot.direction=direction; snapshot.touched=touched.stable;
+        if(calibrated) { snapshot.preview_pressed |= mask & ~snapshot.keys; }
+        snapshot.keys=mask; snapshot.direction=direction; snapshot.touched=touched.stable;
         portEXIT_CRITICAL(&snapshot_lock);
-        for(unsigned i=0;i<14;++i)if(changed[i]){
+        for(unsigned i=0;i<14;++i)if(calibrated && changed[i]){
             publish(InputKind::Key,i,keys[i].stable);
             ESP_LOGI(kTag,"event=key seq=%" PRIu32 " control=%s state=%s raw=0x%04x",
                 sequence++,i<13?kNames[i]:"ENC_PUSH",keys[i].stable?"down":"up",static_cast<unsigned>(raw));
@@ -146,7 +148,11 @@ void input_task(void *) {
         turns = encoder_delta; encoder_delta = 0;
         invalid = encoder_invalid; encoder_invalid = 0;
         portEXIT_CRITICAL(&encoder_lock);
-        if (turns) {
+        if (!calibrated) {
+            if(calibration.waiting(now)) calibration_controls_released=true;
+            else calibration_controls_released &= raw_released && mask==0 && turns==0 && invalid==0;
+        }
+        if (calibrated && turns) {
             portENTER_CRITICAL(&snapshot_lock);
             if(turns < 0) snapshot.preview_right += -turns; else snapshot.preview_left += turns;
             portEXIT_CRITICAL(&snapshot_lock);
@@ -154,8 +160,8 @@ void input_task(void *) {
             ESP_LOGI(kTag, "event=encoder seq=%" PRIu32 " direction=%s steps=%" PRId32,
                 sequence++, turns < 0 ? "CW" : "CCW", turns < 0 ? -turns : turns);
         }
-        if (invalid) { ESP_LOGW(kTag, "event=encoder_invalid count=%" PRIu32, invalid); }
-        if (now >= next_sample) {
+        if (calibrated && invalid) { ESP_LOGW(kTag, "event=encoder_invalid count=%" PRIu32, invalid); }
+        if (now >= next_sample && !calibration.waiting(now)) {
             next_sample = now + 20000;
             int x = 0, y = 0;
             uint32_t touch = 0;
@@ -164,35 +170,41 @@ void input_task(void *) {
             const esp_err_t et = touch_pad_read_raw_data(TOUCH_PAD_NUM7, &touch);
             const bool valid = ex == ESP_OK && ey == ESP_OK && et == ESP_OK && touch > 0;
             if (!valid) {
-                // Fail-fast diagnostics rather than retaining a stale held action.
                 fault(1, int(ex), int(ey), touch, int(et));
-                ESP_LOGE(kTag, "event=sensor_error x=%s y=%s touch=%s raw_touch=%" PRIu32,
-                    esp_err_to_name(ex), esp_err_to_name(ey), esp_err_to_name(et), touch);
-                vTaskDelete(nullptr);
-            }
-            if (!calibrated) {
-                sum_x += x; sum_y += y; sum_touch += touch; ++samples;
-                min_x = std::min(min_x, x); max_x = std::max(max_x, x);
-                min_y = std::min(min_y, y); max_y = std::max(max_y, y);
-                min_touch = std::min(min_touch, touch); max_touch = std::max(max_touch, touch);
-                if (samples == 100) {
-                    center_x = sum_x / samples; center_y = sum_y / samples;
-                    baseline = sum_touch / samples;
-                    // Startup acceptance bounds for joystick centers, touch baseline and sample stability.
-                    // These board-specific thresholds are not universal sensor limits; other hardware needs calibration.
-                    if (center_x < 1400 || center_x > 2300 || center_y < 1400 || center_y > 2300 ||
-                        max_x - min_x > 200 || max_y - min_y > 200 ||
-                        baseline < 20000 || baseline > 45000 || max_touch - min_touch > baseline / 10) {
-                        fault(2, center_x, center_y, baseline, max_x-min_x, max_y-min_y, max_touch-min_touch);
-                        ESP_LOGE(kTag, "event=calibration_failed x=%d y=%d touch=%" PRIu32 " action=release_controls_and_reset",
-                            center_x, center_y, baseline);
-                        vTaskDelete(nullptr);
-                    }
-                    calibrated = true;
-                    portENTER_CRITICAL(&snapshot_lock); snapshot.ready=true; portEXIT_CRITICAL(&snapshot_lock);
+                calibrated = false;
+                calibration.fail(now);
+                direction=candidate=quick=quick_candidate=0; touched={};
+                portENTER_CRITICAL(&snapshot_lock);
+                snapshot.direction=snapshot.quick_direction=0; snapshot.touched=false;
+                snapshot.preview_x=snapshot.preview_y=0; snapshot.preview_pressed=0;
+                portEXIT_CRITICAL(&snapshot_lock);
+                clear_inputs();
+                ESP_LOGW(kTag, "event=sensor_error retry_seconds=%u", 1U << (calibration.failures-1));
+            } else if (!calibrated) {
+                const auto result=calibration.add(now,x,y,touch,calibration_controls_released);
+                calibration_controls_released=true;
+                if(result==InputCalibration::Result::Failed) {
+                    fault(2,calibration.x,calibration.y,calibration.touch,
+                        calibration.max_x-calibration.min_x,calibration.max_y-calibration.min_y,
+                        calibration.max_touch-calibration.min_touch);
+                    calibration.fail(now);
+                    ESP_LOGW(kTag, "event=calibration_retry retry_seconds=%u", 1U << (calibration.failures-1));
+                } else if(result==InputCalibration::Result::Ready) {
+                    center_x=calibration.x; center_y=calibration.y; baseline=calibration.touch;
+                    // No queued gesture or partial encoder detent may cross recovery.
+                    clear_inputs();
+                    portENTER_CRITICAL(&encoder_lock);
+                    encoder_delta=encoder_partial=0; encoder_invalid=0;
+                    portEXIT_CRITICAL(&encoder_lock);
+                    calibrated=true;
+                    portENTER_CRITICAL(&snapshot_lock);
+                    snapshot.preview_pressed=0; snapshot.preview_x=snapshot.preview_y=0;
+                    snapshot.quick_cancelled=false; snapshot.fault=false; snapshot.fault_reason=0;
+                    snapshot.ready=true;
+                    portEXIT_CRITICAL(&snapshot_lock);
                     publish(InputKind::Ready,0,true);
-                    ESP_LOGI(kTag, "event=calibrated x=%d y=%d touch=%" PRIu32 " touch_on=%" PRIu32 " touch_off=%" PRIu32,
-                        center_x, center_y, baseline, baseline + baseline / 2, baseline + baseline / 4);
+                    ESP_LOGI(kTag, "event=calibrated x=%d y=%d touch=%" PRIu32,
+                        center_x,center_y,baseline);
                 }
             } else {
                 const int dx = x - center_x, dy = y - center_y;

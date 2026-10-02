@@ -3,6 +3,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 import package
+import plistlib
+import check_resources
 
 class PackageTests(unittest.TestCase):
     def setUp(self):
@@ -10,6 +12,19 @@ class PackageTests(unittest.TestCase):
         self.root=Path(self.temp.name);self.staged=self.root/'staged';self.dest=self.root/'Firmware'
         self.staged.mkdir();(self.staged/'new').write_text('new')
         self.dest.mkdir();(self.dest/'stale').write_text('old')
+    def test_updater_requirement_must_match_package(self):
+        version=package.VERSION
+        files={
+            'app/EdBoard/Resources/Info.plist':plistlib.dumps({'CFBundleShortVersionString':version}),
+            'app/EdBoard/Services/FirmwareUpdater.swift':f'static let required = "{version}"'.encode(),
+            'firmware/usb-probe/CMakeLists.txt':f'set(PROJECT_VER "{version}")'.encode(),
+        }
+        for name,data in files.items():
+            p=self.root/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(data)
+        check_resources.check_versions(self.root)
+        (self.root/'app/EdBoard/Services/FirmwareUpdater.swift').write_text('static let required = "0.0.0"')
+        with self.assertRaisesRegex(ValueError,'versions must match'):
+            check_resources.check_versions(self.root)
     def test_installation_paths_removed_without_losing_runtime_metadata_or_licenses(self):
         helper = self.root / 'helper'
         metadata = helper / '_internal/example-1.0.dist-info'

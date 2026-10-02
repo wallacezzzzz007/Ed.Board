@@ -527,7 +527,7 @@ final class BoardModel: ObservableObject {
         if let error = header.error {
             let inputFailure: String?
             switch error.code {
-            case "input_fault": inputFailure = "Keyboard input fault. Release all controls, press R briefly and wait 5 seconds. Check the log if it recurs."
+            case "input_fault": inputFailure = "Keyboard input fault. Release all keys, center the joystick and remove your hand from the touch area. Firmware 0.5.1 or later retries automatically; allow up to 15 seconds. If it persists, check diagnostics or power the keyboard off and on."
             case "inputs_not_ready": inputFailure = "Keyboard inputs are initializing. Release all controls and retry in 5 seconds."
             case "transport_not_ready": inputFailure = "Keyboard input transport is not ready. Retry shortly or reconnect."
             default: inputFailure = nil

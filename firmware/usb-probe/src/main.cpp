@@ -289,7 +289,10 @@ bool cancelPairingFromKey() {
 void processInputs(uint32_t session) {
     quickCompleted=false;
     static bool touchSuppressed = false;
+    static bool inputFaultSeen = false;
     auto state=input_snapshot();
+    if(state.fault && !inputFaultSeen) needsSync=true;
+    inputFaultSeen=state.fault;
     if(state.touched && management.automatic_active())touchSuppressed=true;
     // Local layer selection must also work without a usable HID host. Host
     // input is discarded below; link/epoch changes still require release/resync.
