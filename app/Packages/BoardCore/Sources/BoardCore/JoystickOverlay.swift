@@ -15,7 +15,8 @@ public struct JoystickFrame: Decodable {
     public let candidate: Int
     public var isValid: Bool {
         `protocol` == 1 && event == "joystick" && (1...0x7fffffff).contains(token)
-        && (1...6).contains(layer) && (0...0x7fffffff).contains(revision)
+        // Stable layer IDs are independent of the maximum number of configured layers.
+        && (1...255).contains(layer) && (0...0x7fffffff).contains(revision)
         && (-1000...1000).contains(x) && (-1000...1000).contains(y)
         && (candidate == 0 || Control.stickIDs.contains(candidate))
         && (!visible || layer != 1) && (visible || (x == 0 && y == 0 && candidate == 0))

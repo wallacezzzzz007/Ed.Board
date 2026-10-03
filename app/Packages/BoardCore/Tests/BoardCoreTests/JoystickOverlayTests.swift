@@ -42,6 +42,17 @@ final class JoystickOverlayTests: XCTestCase {
         gate.reset()
         XCTAssertTrue(gate.accept(try frame(0, token: 23), token: 23))
     }
+    func testLayerIDsAreNotLimitedByLayerCount() throws {
+        for layer in [7, 255] {
+            var gate = JoystickFrameGate()
+            XCTAssertTrue(gate.accept(try frame(layer: layer), token: 12))
+            XCTAssertTrue(gate.accept(try frame(2, visible: false, layer: layer), token: 12))
+        }
+        for layer in [0, 256] {
+            XCTAssertFalse(try frame(layer: layer).isValid)
+            XCTAssertFalse(try frame(visible: false, layer: layer).isValid)
+        }
+    }
     func testGestureWrapAndInitialHiddenSnapshot() throws {
         var gate = JoystickFrameGate()
         XCTAssertTrue(gate.accept(try frame(1, gesture: UInt32.max, visible: false), token: 12))
@@ -50,6 +61,7 @@ final class JoystickOverlayTests: XCTestCase {
     func testValidTelemetryExcludedButMalformedRetained() throws {
         let line = "@edboard {\"protocol\":1,\"event\":\"joystick\",\"token\":12,\"sequence\":1,\"gesture\":1,\"layer\":2,\"revision\":146,\"visible\":true,\"x\":0,\"y\":-700,\"candidate\":16}"
         XCTAssertTrue(JoystickFrame.isJoystickLine(line))
+        XCTAssertTrue(JoystickFrame.isJoystickLine(line.replacingOccurrences(of: "\"layer\":2", with: "\"layer\":7")))
         XCTAssertFalse(JoystickFrame.isJoystickLine(line.replacingOccurrences(of: "-700", with: "-7000")))
         XCTAssertFalse(JoystickFrame.isJoystickLine("@edboard {\"event\":\"joystick\"}"))
     }
