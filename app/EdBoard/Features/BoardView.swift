@@ -121,7 +121,7 @@ struct BoardView: View {
                 clearSelection()
             }
         } message: {
-            Text(layerOperation == "Delete" ? "Remove this layer.\nSave Changes to apply." : "Disable custom actions and remove app links.\nReset lighting to white at 15%. Keep the name." + (model.selectedLayer == 1 ? "\nCodex switches to Custom; knob and joystick stay managed by Codex." : "") + "\nSave Changes to apply.")
+            Text(layerOperation == "Delete" ? "Remove this layer.\nSave Changes to apply." : (model.selectedLayer == 1 ? "Restore all actions to Managed by Codex and remove app links.\nSwitch to Custom mode." : "Disable custom actions and remove app links.") + "\nReset lighting to white at 15%. Keep the name." + "\nSave Changes to apply.")
         }
         .onChange(of: model.applicationLinkConflict) { message in
             if message != nil { linking = false }

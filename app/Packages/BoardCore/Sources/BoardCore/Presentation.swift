@@ -31,6 +31,13 @@ public struct PresentationCatalog: Codable, Equatable {
         }
         return KeyPresentation()
     }
+    /// Drop local appearance when disabling, or editing a legacy disabled binding.
+    /// Never remove the appearance of an inherited source.
+    public mutating func bindingChanged(layer: Int, control: Int, from old: Binding, to new: Binding) {
+        if old.kind == .disabled || new.kind == .disabled {
+            keys.removeValue(forKey: "\(layer):\(control)")
+        }
+    }
     public mutating func removeLayer(_ id: Int) { keys = keys.filter { !$0.key.hasPrefix("\(id):") } }
 }
 

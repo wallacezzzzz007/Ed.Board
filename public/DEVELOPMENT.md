@@ -2,7 +2,7 @@
 
 [README](../README.md) · [Third-party notices](THIRD_PARTY_NOTICES.md) · [License](../LICENSE)
 
-Ed.Board contains a native SwiftUI/AppKit App, a local Swift package and ESP-IDF firmware. Source versions: **App 0.5.2 (26)** and **firmware 0.5.2** (not yet released). Run the commands below from the repository root.
+Ed.Board contains a native SwiftUI/AppKit App, a local Swift package and ESP-IDF firmware. Source versions: **App 0.5.3 (29)** and **firmware 0.5.3** (not yet released). Run the commands below from the repository root.
 
 ## Changes since 0.5.1
 
@@ -10,6 +10,10 @@ Ed.Board contains a native SwiftUI/AppKit App, a local Swift package and ESP-IDF
 - Add six Media Control actions with inherited/custom presentation and USB/Bluetooth Consumer reports.
 - Preserve existing configuration when reading older storage; write and verify new settings using `snapshot7` (binary format 7). Older snapshots are retained, so downgrading firmware may expose stale settings rather than the latest configuration.
 - Keep external protocol 1/schema 6 and add `mediaVersion: 1` capability detection. Older Apps cannot edit configurations containing the new media action.
+
+Disabled keys use the destination layer’s key lighting. Selecting Disabled removes the key’s custom lighting, name and icon (including custom images) from the draft; choosing another action does not restore it. Discard restores the saved configuration. Inherited Disabled actions and legacy Disabled overrides also render with destination-layer lighting.
+
+Codex defaults and Reset use Managed by Codex for all actions in Custom mode; ordinary layers default to Disabled. Switching Native/Custom preserves existing edits, including explicitly disabled keys. Reset still resets lighting and removes layer links and custom appearance.
 
 Known issues: an old pairing-clear message may remain until **Refresh Status** is clicked; intermittent input unavailability after deep-sleep wake remains under investigation. Neither issue is claimed fixed here. Website detection is not implemented; automatic matching uses the active application.
 
@@ -82,8 +86,8 @@ codesign --force --deep --sign - --timestamp=none app/DerivedData/ReleasePackage
 codesign --verify --deep --strict app/DerivedData/ReleasePackage/Ed.Board.app
 python3 tools/release/package_dmg.py \
   app/DerivedData/ReleasePackage/Ed.Board.app \
-  app/DerivedData/ReleasePackage/Ed.Board-0.5.2-macOS-arm64-candidate.dmg
-shasum -a 256 app/DerivedData/ReleasePackage/Ed.Board-0.5.2-macOS-arm64-candidate.dmg
+  app/DerivedData/ReleasePackage/Ed.Board-0.5.3-macOS-arm64-candidate.dmg
+shasum -a 256 app/DerivedData/ReleasePackage/Ed.Board-0.5.3-macOS-arm64-candidate.dmg
 ```
 
 Use a fresh `ReleasePackage` directory each time; do not merge an old App bundle into a new one. The DMG tool refuses to overwrite an existing output. It verifies image checksums, mounts the image read-only at a system-selected location, compares App contents and signatures, and then detaches it. It neither launches nor installs the App.

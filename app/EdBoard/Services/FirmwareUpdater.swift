@@ -15,7 +15,7 @@ struct FirmwareIdentity: Codable {
 
 @MainActor
 final class FirmwareUpdater: ObservableObject {
-    static let required = "0.5.2"
+    static let required = "0.5.3"
     struct Record: Codable {
         let serial: String
         let target: String

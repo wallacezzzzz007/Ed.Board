@@ -4,7 +4,7 @@ import BoardCore
 final class LightingChordTests: XCTestCase {
     private func inherited() -> BoardConfiguration {
         var c = BoardConfiguration(); c.layers[0].mode = .custom
-        c.layers[0].bindings[0] = Binding(kind: .disabled)
+        c.layers[0].bindings[0] = Binding(kind: .shortcut, usage: 11)
         c.layers.append(Layer.blank(id: 2, name: "Red")); c.layers[1].color = 0xff0000
         c.layers[1].bindings[0] = Binding(kind: .inherit, source: 1)
         return c
@@ -21,6 +21,43 @@ final class LightingChordTests: XCTestCase {
         XCTAssertEqual(c.resolvedLight(layer: 3, control: 0), light)
         c.layers[0].keyLights[0] = nil
         XCTAssertEqual(c.resolvedLight(layer: 3, control: 0)?.color, 0x0000ff)
+    }
+    func testDisablingClearsOverrideWithoutRestoringItOnNewAction() throws {
+        var c = inherited()
+        let custom = LightSpec(effect: 4, color: 0x00ff00, brightness: 20, active: 70)
+        c.layers[0].keyLights[0] = custom
+        c.layers[0].keyLights[1] = custom
+        let saved = c
+        c.layers[0].setBinding(Binding(kind: .disabled), control: 0)
+        XCTAssertNil(c.layers[0].keyLights[0])
+        XCTAssertEqual(c.layers[0].keyLights[1], custom)
+        XCTAssertEqual(c.layers[0].keysLight, saved.layers[0].keysLight)
+        XCTAssertEqual(try JSONDecoder().decode(BoardConfiguration.self, from: JSONEncoder().encode(c)), c)
+        c.layers[0].setBinding(Binding(kind: .shortcut, usage: 12), control: 0)
+        XCTAssertNil(c.layers[0].keyLights[0])
+        c = saved // Discard restores both action and lighting from the saved snapshot.
+        XCTAssertEqual(c.layers[0].keyLights[0], custom)
+        XCTAssertEqual(c.layers[0].bindings[0].kind, .shortcut)
+    }
+    func testLegacyDisabledOverrideAndInheritedDisabledUseDestination() {
+        var c = inherited()
+        c.layers[0].bindings[0] = Binding(kind: .disabled)
+        c.layers[0].keyLights[0] = LightSpec(color: 0x00ff00)
+        c.layers.append(Layer.blank(id: 3, name: "Blue"))
+        c.layers[2].color = 0x0000ff
+        c.layers[2].bindings[0] = Binding(kind: .inherit, source: 2)
+        XCTAssertEqual(c.resolvedLight(layer: 1, control: 0), c.layers[0].keysLight)
+        XCTAssertEqual(c.resolvedLight(layer: 3, control: 0), c.layers[2].keysLight)
+        XCTAssertNil(c.lightOverride(layer: 3, control: 0))
+        c.layers[0].setBinding(Binding(kind: .shortcut, usage: 11), control: 0)
+        XCTAssertNil(c.layers[0].keyLights[0])
+    }
+    func testDisablingInheritedKeyClearsLocalOverride() {
+        var c = inherited()
+        c.layers[1].keyLights[0] = LightSpec(color: 0x00ff00)
+        c.layers[1].setBinding(Binding(kind: .disabled), control: 0)
+        XCTAssertNil(c.layers[1].keyLights[0])
+        XCTAssertEqual(c.resolvedLight(layer: 2, control: 0), c.layers[1].keysLight)
     }
     func testNativeAgentRetainsDynamicLighting() {
         var c = inherited(); c.layers[0].mode = .native

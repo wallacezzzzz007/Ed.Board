@@ -339,7 +339,10 @@ final class BoardModel: ObservableObject {
     }
     var binding: BoardCore.Binding {
         get { layer.bindings[selectedControl] }
-        set { draft.layers[layerIndex].bindings[selectedControl] = newValue }
+        set {
+            presentation.bindingChanged(layer: layer.id, control: selectedControl, from: binding, to: newValue)
+            draft.layers[layerIndex].setBinding(newValue, control: selectedControl)
+        }
     }
     var effectiveDescription: String {
         draft.resolved(layer: layer.id, control: selectedControl)?.description ?? "Invalid inheritance"

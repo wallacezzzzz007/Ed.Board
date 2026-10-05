@@ -66,7 +66,7 @@ Link a layer to an application to switch automatically while that app is active.
 
 ## Firmware
 
-This source tree targets **App 0.5.2 (26) / firmware 0.5.2**, not yet released. Downloaded releases may differ; use the App and firmware supplied together. Media Control requires the new firmware.
+This source tree targets **App 0.5.3 (29) / firmware 0.5.3**, not yet released. Downloaded releases may differ; use the App and firmware supplied together. Media Control requires the new firmware.
 
 Inspired by [AI Micro](https://micro.diyshare.cn/); portions of the firmware are adapted from its code, with the original [MIT license and copyright notice](firmware/usb-probe/src/vendor/LICENSE) retained.
 

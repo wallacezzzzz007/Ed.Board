@@ -119,7 +119,7 @@ public struct Layer: Codable, Equatable, Identifiable {
 }
 extension Layer {
     public static func blank(id: Int, name: String) -> Layer {
-        var layer = Layer(id: id, name: name, mode: .custom, bindings: Array(repeating: Binding(kind: .disabled), count: 25))
+        var layer = Layer(id: id, name: name, mode: .custom, bindings: Array(repeating: Binding(kind: id == 1 ? .native : .disabled), count: 25))
         layer.color = 0xffffff; layer.ringColor = 0xffffff; layer.brightness = 15
         return layer
     }

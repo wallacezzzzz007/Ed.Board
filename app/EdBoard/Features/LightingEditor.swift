@@ -32,6 +32,7 @@ struct KeyLightingPanel: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Lighting").font(.headline)
             if native { Text("Managed by Codex").foregroundStyle(.secondary) }
+            else if model.binding.kind == .disabled { Text("Use layer lighting").foregroundStyle(.secondary) }
             else if inherited {
                 if let value = model.draft.lightOverride(layer: model.selectedLayer, control: model.selectedControl) {
                     HStack { Circle().fill(Color(lightRGB: value.color)).frame(width: 14, height: 14); Text(value.effect == 4 ? "\(value.title) · \(value.brightness)% → \(value.active)%" : "\(value.title) · \(value.brightness)%") }.foregroundStyle(.secondary)

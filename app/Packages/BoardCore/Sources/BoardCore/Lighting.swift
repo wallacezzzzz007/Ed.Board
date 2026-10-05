@@ -17,6 +17,16 @@ public struct LightSpec: Codable, Equatable {
     public var title: String { ["Off", "Solid", "Breathing", "Light on press", "Brighten on press", "Slow rotation"].indices.contains(effect) ? ["Off", "Solid", "Breathing", "Light on press", "Brighten on press", "Slow rotation"][effect] : "Unknown" }
 }
 extension Layer {
+    /// Editing a disabled key discards its independent lighting, including legacy overrides.
+    public mutating func setBinding(_ value: Binding, control: Int) {
+        guard bindings.indices.contains(control) else { return }
+        if keyLights.indices.contains(control),
+           value.kind == .disabled || bindings[control].kind == .disabled {
+            keyLights[control] = nil
+        }
+        bindings[control] = value
+    }
+
     public var keysLight: LightSpec {
         get { LightSpec(effect: effects[0], color: color, brightness: brightness, active: effects[1]) }
         set { if effects[3] < 0 { effects[3] = brightness }; color = newValue.color; brightness = newValue.brightness; effects[0] = newValue.effect; effects[1] = newValue.active }
@@ -34,7 +44,7 @@ extension BoardConfiguration {
             guard let source = layers.first(where: { $0.id == id }), source.mode != .native else { return nil }
             let b = source.bindings[control]
             if b.kind == .inherit { id = b.source; continue }
-            return source.keyLights[control]
+            return b.kind == .disabled ? nil : source.keyLights[control]
         }
         return nil
     }
@@ -48,7 +58,7 @@ extension BoardConfiguration {
             let b = source.bindings[control]
             if b.kind == .inherit { sourceID = b.source; continue }
             if b.kind == .native && control < 6 { return nil }
-            return source.keyLights[control] ?? destination.keysLight
+            return b.kind == .disabled ? destination.keysLight : (source.keyLights[control] ?? destination.keysLight)
         }
         return nil
     }

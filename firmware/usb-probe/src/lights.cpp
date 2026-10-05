@@ -120,7 +120,8 @@ esp_err_t render_lights(const aim::Lights &lights,int64_t now,bool connected,con
                     id = b.source;
                     continue;
                 }
-                if (source->key_lights[i].custom) { v = source->key_lights[i]; }
+                // Disabled actions always use the destination layer, including older saved overrides.
+                if (b.kind != board::Kind::Disabled && source->key_lights[i].custom) { v = source->key_lights[i]; }
                 break;
             }
             pixel(i<6?agent_pixels[i]:command_pixels[i-6],v.color,connected?customLevel(v,now,state.keys&(1U<<i),pressedAt[i]):0);
