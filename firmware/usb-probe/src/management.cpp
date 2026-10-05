@@ -106,7 +106,7 @@ void Management::dispatch(const std::string &line) {
         if(diagnostic_reader)diagnostic_reader();
         auto *r=cJSON_CreateObject();cJSON_AddStringToObject(r,"device","Ed.Board");
         cJSON_AddStringToObject(r,"serial",serial_);cJSON_AddStringToObject(r,"firmware",esp_app_get_description()->version);
-        cJSON_AddStringToObject(r,"controlId","board.layers");cJSON_AddNumberToObject(r,"schemaVersion",6);cJSON_AddStringToObject(r,"migrationNote",store.current().migration_note.c_str());cJSON_AddNumberToObject(r,"runtimeVersion",2);cJSON_AddNumberToObject(r,"previewVersion",1);cJSON_AddNumberToObject(r,"joystickVersion",1);cJSON_AddNumberToObject(r,"powerVersion",2);
+        cJSON_AddStringToObject(r,"controlId","board.layers");cJSON_AddNumberToObject(r,"schemaVersion",6);cJSON_AddStringToObject(r,"migrationNote",store.current().migration_note.c_str());cJSON_AddNumberToObject(r,"runtimeVersion",2);cJSON_AddNumberToObject(r,"previewVersion",1);cJSON_AddNumberToObject(r,"joystickVersion",1);cJSON_AddNumberToObject(r,"mediaVersion",1);cJSON_AddNumberToObject(r,"powerVersion",2);
         cJSON_AddBoolToObject(r,"writable",store.writable());cJSON_AddStringToObject(r,"storageError",store.error().c_str());
         auto state=input_snapshot();cJSON_AddBoolToObject(r,"ready",state.ready&&!state.fault);
         cJSON_AddBoolToObject(r,"batteryValid",state.battery_valid);

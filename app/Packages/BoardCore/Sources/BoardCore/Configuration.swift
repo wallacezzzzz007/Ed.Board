@@ -1,11 +1,36 @@
 import Foundation
 
 public enum ActionKind: String, Codable, CaseIterable, Identifiable {
-    case native, shortcut, disabled, inherit, application, open, text, cancel
+    case native, shortcut, disabled, inherit, application, open, text, cancel, media
     public var isHost: Bool { self == .application || self == .open || self == .text }
     public var id: String { rawValue }
     public var title: String {
-        switch self { case .cancel: return "Cancel"; case .native: return "Managed by Codex"; case .shortcut: return "Shortcut"; case .disabled: return "Disabled"; case .inherit: return "Inherit from layer"; case .application: return "Open application"; case .open: return "Open URL or file"; case .text: return "Insert text" }
+        switch self { case .media: return "Media Control"; case .cancel: return "Cancel"; case .native: return "Managed by Codex"; case .shortcut: return "Shortcut"; case .disabled: return "Disabled"; case .inherit: return "Inherit from layer"; case .application: return "Open application"; case .open: return "Open URL or file"; case .text: return "Insert text" }
+    }
+}
+/// USB HID Consumer Page usages supported by the firmware.
+public enum MediaAction: Int, CaseIterable, Identifiable {
+    case volumeUp = 0xE9, volumeDown = 0xEA, mute = 0xE2, playPause = 0xCD, previousTrack = 0xB6, nextTrack = 0xB5
+    public var id: Int { rawValue }
+    public var title: String {
+        switch self {
+        case .volumeUp: return "Volume Up"
+        case .volumeDown: return "Volume Down"
+        case .mute: return "Mute"
+        case .playPause: return "Play / Pause"
+        case .previousTrack: return "Previous Track"
+        case .nextTrack: return "Next Track"
+        }
+    }
+    public var symbol: String {
+        switch self {
+        case .volumeUp: return "speaker.plus.fill"
+        case .volumeDown: return "speaker.minus.fill"
+        case .mute: return "speaker.slash.fill"
+        case .playPause: return "playpause.fill"
+        case .previousTrack: return "backward.end.fill"
+        case .nextTrack: return "forward.end.fill"
+        }
     }
 }
 public enum LayerMode: String, Codable, CaseIterable { case native, custom }
@@ -34,6 +59,7 @@ public struct Binding: Codable, Equatable {
     public var isValid: Bool {
         if !keys.isEmpty { return kind == .shortcut && usage == 0 && modifiers == 0 && source == 0 && ShortcutKeys.valid(keys) }
         switch kind {
+        case .media: return MediaAction(rawValue: usage) != nil && modifiers == 0 && source == 0
         case .shortcut: return (4...115).contains(usage) && (0...15).contains(modifiers) && source == 0
         case .inherit: return usage == 0 && modifiers == 0 && (1...255).contains(source)
         case .application, .open, .text: return usage == 0 && modifiers == 0 && (1...0x7fffffff).contains(source)
@@ -41,6 +67,7 @@ public struct Binding: Codable, Equatable {
         }
     }
     public var description: String {
+        if kind == .media { return MediaAction(rawValue: usage)?.title ?? kind.title }
         if kind != .shortcut { return kind.title }
         if !keys.isEmpty { return keys.map(ShortcutKeys.title).joined(separator: " + ") }
         let mods = [(8, "⌘"), (2, "⇧"), (4, "⌥"), (1, "⌃")].filter { modifiers & $0.0 != 0 }.map { $0.1 }.joined()
@@ -203,6 +230,7 @@ public struct DeviceInfo: Decodable {
     public let powerVersion: Int?
     public let full: Bool?
     public let joystickVersion: Int?
+    public let mediaVersion: Int?
     public let previewVersion: Int?
     public let runtimeVersion: Int?
     public let writable: Bool

@@ -623,7 +623,7 @@ private struct KeyInspector: View {
                         actionForm.frame(maxWidth: .infinity, alignment: .leading)
                     }
                     if model.selectedControl < 13 { Divider(); KeyLightingPanel(model: model) }
-                    if model.binding.kind == .shortcut {
+                    if model.binding.kind == .shortcut || model.binding.kind == .media {
                         Divider()
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Name & Icon").font(.headline)
@@ -659,7 +659,7 @@ private struct KeyInspector: View {
         .onChange(of: model.selectedLayer) { _ in openAsFile = model.hostValue.hasPrefix("/"); iconPicker = false }
     }
     private var actionOptions: [PopupOption] {
-        var options = [PopupOption(id: "shortcut", title: "Shortcut"), PopupOption(id: "inherit", title: "Inherit from layer"), PopupOption(id: "application", title: "Open application"), PopupOption(id: "url", title: "Open URL"), PopupOption(id: "file", title: "Open file or folder"), PopupOption(id: "text", title: "Insert text")]
+        var options = [PopupOption(id: "shortcut", title: "Shortcut"), PopupOption(id: "media", title: "Media Control", enabled: model.info?.mediaVersion == 1), PopupOption(id: "inherit", title: "Inherit from layer"), PopupOption(id: "application", title: "Open application"), PopupOption(id: "url", title: "Open URL"), PopupOption(id: "file", title: "Open file or folder"), PopupOption(id: "text", title: "Insert text")]
         if model.selectedLayer == 1 && model.selectedControl < 13 { options.append(PopupOption(id: "native", title: "Managed by Codex")) }
         else if model.binding.kind == .native && model.selectedControl < 13 { options.append(PopupOption(id: "native", title: "Codex · Existing", enabled: false)) }
         if Control.isStick(model.selectedControl) { options.append(PopupOption(id: "cancel", title: "Cancel")) }
@@ -674,6 +674,10 @@ private struct KeyInspector: View {
     }
     @ViewBuilder private var actionForm: some View {
         switch model.binding.kind {
+        case .media:
+            Text("Media action").font(.callout).foregroundStyle(.secondary)
+            FullWidthPopup(title: "Media action", selection: SwiftUI.Binding(get: { String(model.binding.usage) }, set: { if let usage = Int($0), MediaAction(rawValue: usage) != nil { model.binding.usage = usage } }), options: MediaAction.allCases.map { PopupOption(id: String($0.rawValue), title: $0.title) })
+                .frame(maxWidth: .infinity).frame(height: 32)
         case .shortcut:
             ShortcutEditor(binding: $model.binding).id("\(model.selectedLayer):\(model.selectedControl)")
         case .inherit:

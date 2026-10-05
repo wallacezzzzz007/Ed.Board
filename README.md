@@ -23,7 +23,7 @@ Keys, layers, lighting and an eight-direction joystick — configured in one pla
 
 | Control | Make it yours |
 | --- | --- |
-| Keys & knob | Assign shortcuts, open apps, URLs or files, and insert text. Add your own names and icons. |
+| Keys & knob | Assign shortcuts and media controls, open apps, URLs or files, and insert text. Add your own names and icons. |
 | Layers | Arrange up to six layers, link them to apps, and inherit actions from other layers. |
 | Joystick | Map eight directions. A compact desktop wheel shows your choices as you move; return to centre to act or cancel. |
 | Lighting | Adjust key and outer lighting, with per-layer colours and input effects. |
@@ -52,6 +52,8 @@ Ed.Board reads the connected keyboard’s configuration. A fresh installation do
 
 Open **Keymap**, choose a layer, and select a key, knob or joystick direction to edit. Choose **Save changes** to apply your work, or **Discard changes** to return to the saved configuration.
 
+Choose **Media Control** in Actions, then select **Volume Up**, **Volume Down**, **Mute**, **Play / Pause**, **Previous Track** or **Next Track**. Each knob step triggers one action; joystick actions execute on return to centre.
+
 Link a layer to an application to switch automatically while that app is active. Selecting a layer in the editor only changes what you are editing, not the keyboard’s active layer.
 
 ## Daily use
@@ -59,11 +61,12 @@ Link a layer to an application to switch automatically while that app is active.
 - **Close the window:** Ed.Board stays in the menu bar and leaves the Dock. Reopen it from the menu bar or Applications.
 - **Start quietly:** enable **System → Launch at Login** to start in the background.
 - **Keep host actions available:** app launching, opening files or URLs, text insertion, automatic app matching and the desktop joystick wheel need Ed.Board running.
+- **Quit the App:** saved shortcuts and media controls still work through the keyboard. Host actions and the desktop wheel stop until Ed.Board is running again.
 - **Insert text:** allow Accessibility access when prompted. Text insertion depends on the target app; shortcuts are simultaneous key combinations, not multi-step macros.
 
 ## Firmware
 
-The current pair is **App 0.5.0 (22) / firmware 0.5.0**.
+This source tree targets **App 0.5.2 (26) / firmware 0.5.2**, not yet released. Downloaded releases may differ; use the App and firmware supplied together. Media Control requires the new firmware.
 
 Inspired by [AI Micro](https://micro.diyshare.cn/); portions of the firmware are adapted from its code, with the original [MIT license and copyright notice](firmware/usb-probe/src/vendor/LICENSE) retained.
 
@@ -74,6 +77,10 @@ This is an updater for compatible devices, **not a universal factory installer**
 ## Help
 
 **macOS says connected, but Ed.Board does not?** Keyboard input and App management use separate connections. Check **Settings → Connection** and retry the App connection. A working Bluetooth keyboard alone does not confirm management access.
+
+**Bluetooth stops connecting after the media-control upgrade?** The new HID report can leave macOS using cached Bluetooth services. Connect over USB, forget **Codex Micro** in macOS Bluetooth settings, then choose **Clear Pairing…** in the App’s **Bluetooth Pairing** section. Unplug USB, hold touch for 3 seconds and pair again. Layer settings are preserved. If the old “Pairing cleared” message remains after **Paired / Ready** appears, click **Refresh Status**; do not clear pairing again.
+
+**Input temporarily unresponsive after deep sleep?** This intermittent issue remains under investigation. Release all controls and allow time for recovery. A connected App does not by itself confirm input readiness.
 
 **Battery says Unknown?** The App may not have received a valid reading yet. Check its connection first. The percentage is a voltage-based estimate, not a precise remaining-runtime prediction.
 
@@ -88,7 +95,7 @@ For hardware information and original firmware resources, also visit [AI Micro](
 Future exploration, guided by community feedback:
 
 - A Chinese App interface.
-- Media controls, multi-step macros and other actions based on community feedback.
+- Multi-step macros and other actions based on community feedback.
 - Firmware support for remembering Bluetooth pairings with multiple computers.
 
 These are exploratory directions, without a committed release schedule.

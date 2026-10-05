@@ -409,7 +409,8 @@ final class BoardModel: ObservableObject {
         let key = "\(layer.id):\(selectedControl)"
         if kind == .inherit && binding.kind != .inherit { directBindings[key] = binding }
         if binding.kind == .inherit, kind != .inherit, let previous = directBindings[key], previous.kind == kind { binding = previous; return }
-        if kind == .shortcut { binding = BoardCore.Binding(kind: kind) }
+        if kind == .media { guard info?.mediaVersion == 1 else { return }; binding = BoardCore.Binding(kind: .media, usage: MediaAction.playPause.rawValue) }
+        else if kind == .shortcut { binding = BoardCore.Binding(kind: kind) }
         else if kind == .inherit { binding = BoardCore.Binding(kind: kind, source: selectedControl >= 13 ? (draft.layers.first { $0.id != layer.id && $0.id != 1 }?.id ?? 0) : (layer.id != 1 ? 1 : (draft.layers.first { $0.id != layer.id }?.id ?? 0))) }
         else { binding = BoardCore.Binding(kind: kind) }
         pruneHostDraft()
@@ -984,7 +985,7 @@ extension BoardModel {
 extension BoardModel {
     var currentPresentation: KeyPresentation {
         get { presentation.keys["\(selectedLayer):\(selectedControl)"] ?? KeyPresentation() }
-        set { guard binding.kind == .shortcut else { return }; presentation.keys["\(selectedLayer):\(selectedControl)"] = newValue }
+        set { guard binding.kind == .shortcut || binding.kind == .media else { return }; presentation.keys["\(selectedLayer):\(selectedControl)"] = newValue }
     }
     func presentationFor(layer id: Int, control: Int) -> KeyPresentation {
         let custom = presentation.resolved(config: draft, layer: id, control: control)
@@ -1051,7 +1052,7 @@ extension BoardModel {
             Task { @MainActor in
                 guard let self, response == .OK, let url = panel.url, self.hostSerial == serial,
                       self.selectedLayer == layerID, self.selectedControl == control, self.canEdit,
-                      self.binding.kind == .shortcut else { return }
+                      (self.binding.kind == .shortcut || self.binding.kind == .media) else { return }
                 guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 8_000_000,
                       let source = CGImageSourceCreateWithURL(url as CFURL, nil),
                       let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [

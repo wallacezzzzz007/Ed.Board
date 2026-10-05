@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-set(PROJECT_VER "0.5.1")
+set(PROJECT_VER "0.5.2")
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(edboard_codex_probe)
 if(NOT CONFIG_PARTITION_TABLE_CUSTOM_FILENAME STREQUAL "partitions.csv")

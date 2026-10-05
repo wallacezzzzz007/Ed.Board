@@ -4,10 +4,11 @@
 #include <string>
 #include <vector>
 #include "cJSON.h"
+#include "media.hpp"
 
 namespace board {
 constexpr size_t control_count=25, max_layers=6, config_bytes=8192, frame_bytes=32768;
-enum class Kind { Native=0, Shortcut=1, Disabled=2, Inherit=3, Application=4, Open=5, Text=6, Cancel=7 };
+enum class Kind { Native=0, Shortcut=1, Disabled=2, Inherit=3, Application=4, Open=5, Text=6, Cancel=7, Media=8 };
 struct Binding { Kind kind=Kind::Native; uint8_t usage=0, modifiers=0; uint32_t source=0; uint8_t key_count=0; std::array<uint8_t,14> keys{}; };
 struct LightSpec { bool custom=false; uint8_t effect=1; uint32_t color=0xffffff; uint8_t brightness=15, active=100; };
 inline bool is_host(Kind k) { return k==Kind::Application||k==Kind::Open||k==Kind::Text; }

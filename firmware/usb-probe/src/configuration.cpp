@@ -34,13 +34,13 @@ static bool decode_light(const cJSON *j,LightSpec &v) {
 static bool decode_binding(const cJSON *j,Binding &out,bool legacy=false,bool allow_host=false,bool extended=false) {
     const char *fields[]={"kind","usage","modifiers","source","keys"};
     bool has_keys=extended&&field(j,"keys");
-    if(!exact_fields(j,fields,legacy?3:has_keys?5:4)||!cJSON_IsString(field(j,"kind"))||!number(j,"usage",115)||!number(j,"modifiers",15)||(!legacy&&!number(j,"source",0x7fffffff)))return false;
+    if(!exact_fields(j,fields,legacy?3:has_keys?5:4)||!cJSON_IsString(field(j,"kind"))||!number(j,"usage",255)||!number(j,"modifiers",15)||(!legacy&&!number(j,"source",0x7fffffff)))return false;
     Binding b;const char *k=field(j,"kind")->valuestring;
     if(!strcmp(k,"native"))b.kind=Kind::Native;else if(!strcmp(k,"shortcut"))b.kind=Kind::Shortcut;
     else if(!strcmp(k,"disabled"))b.kind=Kind::Disabled;else if(!legacy&&!strcmp(k,"inherit"))b.kind=Kind::Inherit;
     else if(allow_host&&!strcmp(k,"application"))b.kind=Kind::Application;
     else if(allow_host&&!strcmp(k,"open"))b.kind=Kind::Open;
-    else if(allow_host&&!strcmp(k,"text"))b.kind=Kind::Text;else if(extended&&!strcmp(k,"cancel"))b.kind=Kind::Cancel;else return false;
+    else if(allow_host&&!strcmp(k,"text"))b.kind=Kind::Text;else if(extended&&!strcmp(k,"media"))b.kind=Kind::Media;else if(extended&&!strcmp(k,"cancel"))b.kind=Kind::Cancel;else return false;
     b.usage=integer(j,"usage");b.modifiers=integer(j,"modifiers");b.source=legacy?0:integer(j,"source");
     if(has_keys) {
         auto *keys=field(j,"keys");int count=cJSON_GetArraySize(keys);bool seen[256]{};unsigned normal=0;
@@ -51,7 +51,8 @@ static bool decode_binding(const cJSON *j,Binding &out,bool legacy=false,bool al
         if (normal > 6) { return false; }
         b.key_count = count;
     }
-    if(b.kind==Kind::Shortcut){if((!b.key_count&&b.usage<4)||b.source)return false;}
+    if(b.kind==Kind::Shortcut){if((!b.key_count&&(b.usage<4||b.usage>115))||b.source)return false;}
+    else if(b.kind==Kind::Media){if(!media_bit(b.usage)||b.modifiers||b.source||has_keys)return false;}
     else if(is_host(b.kind)){if(b.usage||b.modifiers||!b.source)return false;}
     else if(b.usage||b.modifiers||(b.kind==Kind::Inherit?(!b.source||b.source>255):bool(b.source)))return false;
     out=b;return true;
@@ -138,7 +139,7 @@ cJSON *encode_config(const Configuration &c) {
             }
         }
         auto *bindings=cJSON_AddArrayToObject(v,"bindings");for(auto b:l.bindings){auto *x=cJSON_CreateObject();cJSON_AddItemToArray(bindings,x);
-            const char *kind=b.kind==Kind::Native?"native":b.kind==Kind::Shortcut?"shortcut":b.kind==Kind::Disabled?"disabled":b.kind==Kind::Inherit?"inherit":b.kind==Kind::Application?"application":b.kind==Kind::Open?"open":b.kind==Kind::Text?"text":"cancel";
+            const char *kind=b.kind==Kind::Native?"native":b.kind==Kind::Shortcut?"shortcut":b.kind==Kind::Disabled?"disabled":b.kind==Kind::Inherit?"inherit":b.kind==Kind::Application?"application":b.kind==Kind::Open?"open":b.kind==Kind::Text?"text":b.kind==Kind::Media?"media":"cancel";
             cJSON_AddStringToObject(x,"kind",kind);cJSON_AddNumberToObject(x,"usage",b.usage);cJSON_AddNumberToObject(x,"modifiers",b.modifiers);cJSON_AddNumberToObject(x,"source",b.source);if(b.key_count){auto *keys=cJSON_AddArrayToObject(x,"keys");for(unsigned i=0;i<b.key_count;++i)cJSON_AddItemToArray(keys,cJSON_CreateNumber(b.keys[i]));}}
     }return j;
 }
@@ -160,9 +161,9 @@ static bool expand_storage(cJSON *config,bool host) {
         }
     }return true;
 }
-static std::vector<uint8_t> pack6(const Configuration &c) {
+static std::vector<uint8_t> pack7(const Configuration &c) {
     std::vector<uint8_t> data;auto put=[&](uint32_t n,unsigned bytes=1){for(unsigned i=0;i<bytes;++i)data.push_back((n>>(i*8))&255);};
-    put(6);put(c.revision,4);put(c.layers.size());
+    put(7);put(c.revision,4);put(c.layers.size());
     for(const auto &l:c.layers){put(l.id);put(l.name.size());for(auto ch:l.name)put(uint8_t(ch));put(l.native);
         put(l.color,3);put(l.ring_color,3);put(l.brightness);for(int e:l.effects)put(e<0?255:e);
         for(auto b:l.bindings){put(unsigned(b.kind));put(b.usage);put(b.modifiers);put(b.source,4);put(b.key_count);for(auto k:b.keys)put(k);}
@@ -172,7 +173,7 @@ static std::vector<uint8_t> pack6(const Configuration &c) {
 static bool unpack_binary(const std::vector<char> &data,size_t size,Configuration &out) {
     size_t at=0;bool ok=true;auto get=[&](unsigned bytes=1)->uint32_t{if(at+bytes>size){ok=false;return 0;}uint32_t n=0;for(unsigned i=0;i<bytes;++i)n|=uint32_t(uint8_t(data[at++]))<<(i*8);return n;};
     unsigned version = get();
-    if (version != 5 && version != 6) { return false; }
+    if (version != 5 && version != 6 && version != 7) { return false; }
     Configuration c;
     c.revision = get(4);
     unsigned count = get();
@@ -180,7 +181,7 @@ static bool unpack_binary(const std::vector<char> &data,size_t size,Configuratio
     c.layers.clear();
     for(unsigned n=0;n<count;++n){Layer l;l.id=get();unsigned len=get();if(len<1||len>48)return false;l.name.clear();for(unsigned i=0;i<len;++i)l.name+=char(get());unsigned native=get();if(native>1)return false;l.native=native;
         l.color=get(3);l.ring_color=get(3);l.brightness=get();for(unsigned i=0;i<5;++i){unsigned e=get();l.effects[i]=(i==3&&e==255)?-1:int(e);}
-        for(unsigned i=0;i<(version==5?20:control_count);++i){auto &b=l.bindings[i];unsigned kind=get();if(kind>(version==5?6:7))return false;b.kind=Kind(kind);b.usage=get();b.modifiers=get();b.source=get(4);b.key_count=get();if(b.key_count>14)return false;for(auto &k:b.keys)k=get();}
+        for(unsigned i=0;i<(version==5?20:control_count);++i){auto &b=l.bindings[i];unsigned kind=get();if(kind>(version==5?6:version==6?7:8))return false;b.kind=Kind(kind);b.usage=get();b.modifiers=get();b.source=get(4);b.key_count=get();if(b.key_count>14)return false;for(auto &k:b.keys)k=get();}
         for(auto &v:l.key_lights){unsigned custom=get();if(custom>1)return false;v.custom=custom;v.effect=get();v.color=get(3);v.brightness=get();v.active=get();}
         if (version == 5) {
             for (unsigned i=20; i<control_count; ++i) { l.bindings[i] = {Kind::Disabled}; }
@@ -206,15 +207,16 @@ static bool unpack_binary(const std::vector<char> &data,size_t size,Configuratio
 void ConfigStore::load(){
     value_={};writable_=false;error_.clear();esp_err_t e=nvs_flash_init_partition("edboard");if(e!=ESP_OK){error_=esp_err_to_name(e);return;}
     nvs_handle_t handle;e=nvs_open_from_partition("edboard","config",NVS_READWRITE,&handle);if(e!=ESP_OK){error_=esp_err_to_name(e);return;}
-    size_t size=0;const char *key="snapshot6";int format=6;
+    size_t size=0;const char *key="snapshot7";int format=7;
     e=nvs_get_blob(handle,key,nullptr,&size);
+    if(e==ESP_ERR_NVS_NOT_FOUND){format=6;key="snapshot6";e=nvs_get_blob(handle,key,nullptr,&size);}
     if(e==ESP_ERR_NVS_NOT_FOUND){format=5;key="snapshot5";e=nvs_get_blob(handle,key,nullptr,&size);}
     if(e==ESP_ERR_NVS_NOT_FOUND){format=4;key="snapshot4";e=nvs_get_blob(handle,key,nullptr,&size);}
     if(e==ESP_ERR_NVS_NOT_FOUND){format=3;key="snapshot3";e=nvs_get_blob(handle,key,nullptr,&size);}
     if(e==ESP_ERR_NVS_NOT_FOUND){format=2;key="snapshot2";e=nvs_get_blob(handle,key,nullptr,&size);}
     if(e==ESP_ERR_NVS_NOT_FOUND){format=1;key="snapshot";e=nvs_get_str(handle,key,nullptr,&size);}
     if(e==ESP_ERR_NVS_NOT_FOUND){nvs_close(handle);writable_=true;return;}
-    if(e!=ESP_OK||size==0||size>(format==6?8192:format>=3?4096:config_bytes)){nvs_close(handle);error_=e==ESP_OK?"snapshot_too_large":esp_err_to_name(e);return;}
+    if(e!=ESP_OK||size==0||size>(format>=6?8192:format>=3?4096:config_bytes)){nvs_close(handle);error_=e==ESP_OK?"snapshot_too_large":esp_err_to_name(e);return;}
     std::vector<char> data(size+1,0);e=format==1?nvs_get_str(handle,key,data.data(),&size):nvs_get_blob(handle,key,data.data(),&size);nvs_close(handle);
     if(e!=ESP_OK){error_=esp_err_to_name(e);return;}
     if(format>=5){Configuration next;if(unpack_binary(data,size,next)){value_=next;writable_=true;}else error_="invalid_snapshot";return;}
@@ -235,11 +237,11 @@ bool ConfigStore::save(const Configuration &config){
     Configuration next=config;next.migration_note.clear();next.revision=value_.revision+1;
     next.manual_layer=next.layer(value_.manual_layer)?value_.manual_layer:next.layers.front().id;
     next.active_layer=next.manual_layer; // Config changes clear the temporary auto override.
-    auto bytes=pack6(next);size_t size=bytes.size();const auto *encoded=bytes.data();
+    auto bytes=pack7(next);size_t size=bytes.size();const auto *encoded=bytes.data();
     if(size>8192){error_="snapshot_too_large";return false;}
     nvs_handle_t handle;esp_err_t e=nvs_open_from_partition("edboard","config",NVS_READWRITE,&handle);
-    if(e==ESP_OK){e=nvs_set_blob(handle,"snapshot6",encoded,size);if(e==ESP_OK)e=nvs_commit(handle);
-        std::vector<char> check(size,0);size_t read=size;if(e==ESP_OK)e=nvs_get_blob(handle,"snapshot6",check.data(),&read);
+    if(e==ESP_OK){e=nvs_set_blob(handle,"snapshot7",encoded,size);if(e==ESP_OK)e=nvs_commit(handle);
+        std::vector<char> check(size,0);size_t read=size;if(e==ESP_OK)e=nvs_get_blob(handle,"snapshot7",check.data(),&read);
         if(e==ESP_OK&&(read!=size||memcmp(check.data(),encoded,size)))e=ESP_FAIL;
         nvs_close(handle);}
     if(e!=ESP_OK){writable_=false;error_=esp_err_to_name(e);return false;}

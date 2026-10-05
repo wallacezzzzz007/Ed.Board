@@ -68,6 +68,10 @@ public enum ActionPresentation {
         case .native: return KeyPresentation(name: "Codex", symbol: "terminal")
         case .cancel: return KeyPresentation(name: "Cancel", symbol: "xmark")
         case .disabled: return KeyPresentation(name: "Disabled", symbol: "nosign")
+        case .media:
+            let action = MediaAction(rawValue: binding.usage)
+            return KeyPresentation(name: custom.name.isEmpty ? binding.description : custom.name,
+                                   symbol: custom.symbol.isEmpty && custom.image == nil ? (action?.symbol ?? "playpause.fill") : custom.symbol, image: custom.image)
         case .shortcut:
             return KeyPresentation(name: custom.name.isEmpty ? binding.description : custom.name,
                                    symbol: custom.symbol.isEmpty && custom.image == nil ? "keyboard" : custom.symbol, image: custom.image)

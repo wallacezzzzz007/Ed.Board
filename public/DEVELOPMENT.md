@@ -2,7 +2,16 @@
 
 [README](../README.md) · [Third-party notices](THIRD_PARTY_NOTICES.md) · [License](../LICENSE)
 
-Ed.Board contains a native SwiftUI/AppKit App, a local Swift package and ESP-IDF firmware. Current versions: **App 0.5.0 (22)** and **firmware 0.5.0**. Run the commands below from the repository root.
+Ed.Board contains a native SwiftUI/AppKit App, a local Swift package and ESP-IDF firmware. Source versions: **App 0.5.2 (26)** and **firmware 0.5.2** (not yet released). Run the commands below from the repository root.
+
+## Changes since 0.5.1
+
+- Fix the desktop joystick wheel for valid layer IDs above 6; the six-layer limit applies to count, not ID.
+- Add six Media Control actions with inherited/custom presentation and USB/Bluetooth Consumer reports.
+- Preserve existing configuration when reading older storage; write and verify new settings using `snapshot7` (binary format 7). Older snapshots are retained, so downgrading firmware may expose stale settings rather than the latest configuration.
+- Keep external protocol 1/schema 6 and add `mediaVersion: 1` capability detection. Older Apps cannot edit configurations containing the new media action.
+
+Known issues: an old pairing-clear message may remain until **Refresh Status** is clicked; intermittent input unavailability after deep-sleep wake remains under investigation. Neither issue is claimed fixed here. Website detection is not implemented; automatic matching uses the active application.
 
 ## Requirements
 
@@ -49,7 +58,12 @@ Offline Python checks:
 python3 -B -m unittest discover -s tools/firmware -p 'test_*.py'
 python3 -B -m unittest discover -s tools/release -p 'test_*.py'
 python3 -B -m unittest discover -s tools/logging -p 'test_*.py'
+python3 -B -m unittest discover -s tools/joystick -p 'test_*.py'
 ```
+
+The media configuration test uses cJSON from the project ESP-IDF dependency (or `CJSON_DIR`) with in-memory NVS; it skips explicitly if that dependency is unavailable.
+
+Media Control requires firmware advertising `mediaVersion: 1`. It adds Consumer Control report 2 alongside the existing keyboard report 1 and Codex report 6. Test all six actions over USB and Bluetooth, including repeated encoder steps, inherited actions, disconnect/reconnect and App-closed operation. After the HID report map changes, a host with cached Bluetooth services may need the keyboard to be forgotten and paired again.
 
 These tests do not replace device testing. Check USB and Bluetooth, save/discard, layer inheritance, app matching, joystick feedback, sleep/wake reconnection and menu-bar/Dock behavior on hardware.
 
@@ -68,8 +82,8 @@ codesign --force --deep --sign - --timestamp=none app/DerivedData/ReleasePackage
 codesign --verify --deep --strict app/DerivedData/ReleasePackage/Ed.Board.app
 python3 tools/release/package_dmg.py \
   app/DerivedData/ReleasePackage/Ed.Board.app \
-  app/DerivedData/ReleasePackage/Ed.Board-0.5.0-macOS-arm64-candidate.dmg
-shasum -a 256 app/DerivedData/ReleasePackage/Ed.Board-0.5.0-macOS-arm64-candidate.dmg
+  app/DerivedData/ReleasePackage/Ed.Board-0.5.2-macOS-arm64-candidate.dmg
+shasum -a 256 app/DerivedData/ReleasePackage/Ed.Board-0.5.2-macOS-arm64-candidate.dmg
 ```
 
 Use a fresh `ReleasePackage` directory each time; do not merge an old App bundle into a new one. The DMG tool refuses to overwrite an existing output. It verifies image checksums, mounts the image read-only at a system-selected location, compares App contents and signatures, and then detaches it. It neither launches nor installs the App.

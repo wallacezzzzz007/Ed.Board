@@ -40,7 +40,12 @@ const uint8_t kReportDescriptor[] = {
     0x05,0x01,0x09,0x06,0xA1,0x01,0x85,0x01,
     0x05,0x07,0x19,0xE0,0x29,0xE7,0x15,0x00,0x25,0x01,0x75,0x01,0x95,0x08,0x81,0x02,
     0x95,0x01,0x75,0x08,0x81,0x01,
-    0x95,0x06,0x75,0x08,0x15,0x00,0x26,0xA4,0x00,0x19,0x00,0x2A,0xA4,0x00,0x81,0x00,0xC0
+    0x95,0x06,0x75,0x08,0x15,0x00,0x26,0xA4,0x00,0x19,0x00,0x2A,0xA4,0x00,0x81,0x00,0xC0,
+    // Consumer Control report 2: volume +/-, mute, play/pause, previous, next.
+    0x05,0x0C,0x09,0x01,0xA1,0x01,0x85,0x02,
+    0x15,0x00,0x25,0x01,0x75,0x01,0x95,0x06,
+    0x09,0xE9,0x09,0xEA,0x09,0xE2,0x09,0xCD,0x09,0xB6,0x09,0xB5,0x81,0x02,
+    0x75,0x02,0x95,0x01,0x81,0x01,0xC0
 };
 const tusb_desc_device_t kDevice = {
     .bLength = sizeof(tusb_desc_device_t), .bDescriptorType = TUSB_DESC_DEVICE,
@@ -240,7 +245,24 @@ bool sendKeyboard(uint32_t session) {
     if(ok)++keyboardSent;else{++txFailures;armed=false;needsSync=true;}
     return ok;
 }
+// Media actions are pulses, so even a held mute/play key fires only once.
+// Keep a pending release across transient send failures, cleared on link changes.
+board::MediaPulse mediaPulse;
+bool sendMedia(uint8_t bits,uint32_t session) {
+    const int64_t deadline=esp_timer_get_time()+500000;
+    while(inputLinkReady()&&epoch.load()==session&&esp_timer_get_time()<deadline) {
+        bool ok=activeLink.load()==2 ? aim::ble_report(2,&bits,1) :
+            (tud_hid_n_ready(0)&&tud_hid_n_report(0,2,&bits,1));
+        if(ok)return true;
+        vTaskDelay(1);
+    }
+    ++txFailures;armed=false;needsSync=true;return false;
+}
 bool customInput(unsigned control,board::Binding binding,bool down,uint32_t session) {
+    if(binding.kind==board::Kind::Media) {
+        if(!down||!inputLinkReady())return true;
+        return mediaPulse.trigger(binding.usage,down,[&](uint8_t bits){return sendMedia(bits,session);});
+    }
     if(board::is_host(binding.kind)) {
         if(down)management.trigger_host(control,binding);
         return true;
@@ -271,6 +293,7 @@ bool stickInput(int direction,bool down,uint32_t session) {
 bool releaseAll(uint32_t session) {
     // Re-establish a released state before accepting fresh physical presses.
     shortcutDown.fill(false);previousDirection=0;resetCustomGestures();
+    if(!mediaPulse.release([&](uint8_t bits){return sendMedia(bits,session);}))return false;
     if(!sendKeyboard(session))return false;
     for(int i=0;i<14;++i)if(!sendInput(aim::Protocol::key(keyNames[i],false,i<6?i:-1),session))return false;
     if(!sendInput(aim::Protocol::radial(0,0),session))return false;
@@ -333,7 +356,7 @@ void processInputs(uint32_t session) {
                 break;
             }
             auto binding=bindingFor(event.value);
-            if(binding.kind!=board::Kind::Native){dispatched=binding.kind==board::Kind::Shortcut;ok=customInput(event.value,binding,event.down,session);}
+            if(binding.kind!=board::Kind::Native){dispatched=binding.kind==board::Kind::Shortcut||binding.kind==board::Kind::Media;ok=customInput(event.value,binding,event.down,session);}
             else if(linkReady)ok=sendInput(aim::Protocol::key(keyNames[event.value],event.down,event.value<6?event.value:-1),session);
             break;
         }
@@ -607,7 +630,7 @@ extern "C" void app_main() {
         const uint32_t generation=bleError==ESP_OK?aim::ble_generation():0;
         if(nextLink!=activeLink.load()||(nextLink==2&&generation!=lastBleGeneration)) {
             aim::ble_trace("active_link",activeLink.load(),nextLink);
-            activeLink=nextLink;++epoch;
+            activeLink=nextLink;++epoch;mediaPulse.reset();
             logLine("event=active_link link=%u",nextLink);
         }
         lastBleGeneration=generation;

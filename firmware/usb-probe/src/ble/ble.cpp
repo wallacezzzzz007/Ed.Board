@@ -25,7 +25,7 @@ BleTrace trace_entries[96]{};
 unsigned trace_head=0,trace_count=0;
 uint32_t trace_sequence=0,trace_lost=0;
 Receive receiver=nullptr;
-std::atomic<bool> enabled{false},connected{false},secure{false},subscribed{false},keyboard_subscribed{false};
+std::atomic<bool> enabled{false},connected{false},secure{false},subscribed{false},keyboard_subscribed{false},media_subscribed{false};
 std::atomic<unsigned> bond_count{0};
 std::atomic<int> security_status{0},disconnect_reason{0};
 std::atomic<int> advertise_status{0};
@@ -43,7 +43,7 @@ std::atomic<uint32_t> directed_starts{0};
 bool tried_directed=false; // host-task owned, reset for each enable cycle
 std::atomic<uint32_t> adv_starts{0},connect_events{0},disconnect_events{0},encryption_events{0},subscription_events{0},repeat_events{0};
 std::atomic<int> connect_status{0},security_start_status{0},mtu_start_status{0},last_mtu{0};
-uint16_t keyboard_handle=0,vendor_handle=0,management_handle=0;
+uint16_t keyboard_handle=0,vendor_handle=0,management_handle=0,media_handle=0;
 std::atomic<bool> management_subscribed{false};
 std::atomic<uint32_t> management_generation{0};
 portMUX_TYPE management_lock=portMUX_INITIALIZER_UNLOCKED;
@@ -63,20 +63,22 @@ ble_uuid16_t control_uuid=BLE_UUID16_INIT(0x2A4C),report_uuid=BLE_UUID16_INIT(0x
 ble_uuid16_t ref_uuid=BLE_UUID16_INIT(0x2908),dis_uuid=BLE_UUID16_INIT(0x180A),pnp_uuid=BLE_UUID16_INIT(0x2A50);
 ble_uuid16_t manufacturer_uuid=BLE_UUID16_INIT(0x2A29),version_uuid=BLE_UUID16_INIT(0x2A26);
 ble_uuid16_t bas_uuid=BLE_UUID16_INIT(0x180F),level_uuid=BLE_UUID16_INIT(0x2A19);
-enum Attribute {Info=1,Map,Mode,Control,Keyboard,VendorIn,VendorOut,KeyboardRef,VendorInRef,VendorOutRef,Pnp,Manufacturer,Version,Battery,ManagementIn,ManagementOut};
+enum Attribute {Info=1,Map,Mode,Control,Keyboard,VendorIn,VendorOut,KeyboardRef,VendorInRef,VendorOutRef,Pnp,Manufacturer,Version,Battery,ManagementIn,ManagementOut,Media,MediaRef};
 int append(os_mbuf* om,const void* b,size_t n) {return os_mbuf_append(om,b,n)==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;}
 int access(uint16_t,uint16_t,ble_gatt_access_ctxt* ctx,void* argument) {
     auto field=static_cast<Attribute>(reinterpret_cast<uintptr_t>(argument));
     bool reading=ctx->op==BLE_GATT_ACCESS_OP_READ_CHR||ctx->op==BLE_GATT_ACCESS_OP_READ_DSC;
     if(reading) {
         static const uint8_t info[]={0x11,0x01,0,0x02},pnp[]={2,0x3A,0x30,0x60,0x83,1,1};
-        static const uint8_t kref[]={1,1},viref[]={6,1},voref[]={6,2};
+        static const uint8_t kref[]={1,1},viref[]={6,1},voref[]={6,2},mref[]={2,1};
         static const uint8_t empty[63]{};
         switch(field) {
             case Info:return append(ctx->om,info,sizeof(info));
             case Map:return append(ctx->om,hid_map,sizeof(hid_map));
             case Mode:return append(ctx->om,&protocol_mode,1);
             case Keyboard:return append(ctx->om,empty,8);
+            case Media:return append(ctx->om,empty,1);
+            case MediaRef:return append(ctx->om,mref,2);
             case VendorIn:case VendorOut:return append(ctx->om,empty,63);
             case KeyboardRef:return append(ctx->om,kref,2);
             case VendorInRef:return append(ctx->om,viref,2);
@@ -115,8 +117,8 @@ int access(uint16_t,uint16_t,ble_gatt_access_ctxt* ctx,void* argument) {
     }
     return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
 }
-ble_gatt_dsc_def refs[3][2]{};
-ble_gatt_chr_def hid_chars[8]{},dis_chars[4]{},bas_chars[2]{};
+ble_gatt_dsc_def refs[4][2]{};
+ble_gatt_chr_def hid_chars[9]{},dis_chars[4]{},bas_chars[2]{};
 ble_gatt_chr_def management_chars[3]{};
 ble_gatt_svc_def services[5]{};
 void characteristic(ble_gatt_chr_def& c,const ble_uuid16_t& uuid,Attribute a,ble_gatt_chr_flags flags,uint16_t* value=nullptr,ble_gatt_dsc_def* descriptors=nullptr) {
@@ -129,6 +131,10 @@ void setup_services() {
         refs[i][0].uuid=&ref_uuid.u;refs[i][0].access_cb=access;refs[i][0].att_flags=BLE_ATT_F_READ|BLE_ATT_F_READ_ENC;
         refs[i][0].arg=reinterpret_cast<void*>(uintptr_t(KeyboardRef+i));
     }
+    refs[3][0].uuid=&ref_uuid.u;refs[3][0].access_cb=access;
+    refs[3][0].att_flags=BLE_ATT_F_READ|BLE_ATT_F_READ_ENC;
+    refs[3][0].arg=reinterpret_cast<void*>(uintptr_t(MediaRef));
+    characteristic(hid_chars[7],report_uuid,Media,read|BLE_GATT_CHR_F_NOTIFY,&media_handle,refs[3]);
     characteristic(hid_chars[0],info_uuid,Info,read);
     characteristic(hid_chars[1],map_uuid,Map,read);
     characteristic(hid_chars[2],mode_uuid,Mode,read|write);
@@ -252,7 +258,7 @@ int gap(ble_gap_event* e,void*) {
             ++disconnect_events;
             ++generation;disconnect_reason=e->disconnect.reason;
             management_subscribed=false;reset_management();
-            connected=false;secure=false;subscribed=false;keyboard_subscribed=false;handle=BLE_HS_CONN_HANDLE_NONE;
+            connected=false;secure=false;subscribed=false;keyboard_subscribed=false;media_subscribed=false;handle=BLE_HS_CONN_HANDLE_NONE;
             if(clear_status.load()==-1)ble_npl_eventq_put(nimble_port_get_dflt_eventq(),&control_event);else advertise();break;
         case BLE_GAP_EVENT_ENC_CHANGE: {
             ++encryption_events;
@@ -273,10 +279,11 @@ int gap(ble_gap_event* e,void*) {
                 management_subscribed=e->subscribe.cur_notify;reset_management();
                 ble_trace("management_subscribe",e->subscribe.cur_notify);break;
             }
-            ble_trace("subscribe",e->subscribe.attr_handle==keyboard_handle?1:e->subscribe.attr_handle==vendor_handle?6:0,e->subscribe.cur_notify);
+            ble_trace("subscribe",e->subscribe.attr_handle==keyboard_handle?1:e->subscribe.attr_handle==vendor_handle?6:e->subscribe.attr_handle==media_handle?2:0,e->subscribe.cur_notify);
             ++subscription_events;
             if(e->subscribe.attr_handle==vendor_handle)subscribed=e->subscribe.cur_notify;
             if(e->subscribe.attr_handle==keyboard_handle)keyboard_subscribed=e->subscribe.cur_notify;
+            if(e->subscribe.attr_handle==media_handle)media_subscribed=e->subscribe.cur_notify;
             break;
         case BLE_GAP_EVENT_MTU:ble_trace("mtu",e->mtu.value);last_mtu=e->mtu.value;break;
         case BLE_GAP_EVENT_REPEAT_PAIRING:ble_trace("repeat_pairing");++repeat_events;return BLE_GAP_REPEAT_PAIRING_IGNORE;
@@ -380,9 +387,10 @@ bool ble_report(uint8_t id,const uint8_t* b,size_t n) {
     if(!enabled||!connected||!secure)return false;
     if(id==6) {if(!connected||!secure||!subscribed||ble_att_mtu(handle)<66||n!=63)return false;}
     else if(id==1) {if(!keyboard_subscribed||n!=8)return false;}
+    else if(id==2) {if(!media_subscribed||n!=1)return false;}
     else return false;
     os_mbuf* packet=ble_hs_mbuf_from_flat(b,n);if(!packet)return false;
-    return ble_gatts_notify_custom(handle,id==6?vendor_handle:keyboard_handle,packet)==0;
+    return ble_gatts_notify_custom(handle,id==6?vendor_handle:id==2?media_handle:keyboard_handle,packet)==0;
 }
 }
 

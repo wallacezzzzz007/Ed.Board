@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Ed.Board lighting and chord configuration v5",
-  "description": "Schema 6: 25 controls. Runtime validation additionally requires native bindings for Codex controls 13\u201324; ordinary controls 13\u201324 cannot be native or inherit Codex. Cancel only on joystick controls 16\u201319 and 21\u201324.",
+  "description": "Schema 6: 25 controls. Runtime validation additionally requires native bindings for Codex controls 13–24; ordinary controls 13–24 cannot be native or inherit Codex. Cancel only on joystick controls 16–19 and 21–24.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -222,6 +222,37 @@
                         ]
                       },
                       "description": "Runtime also enforces at most six non-modifier keys."
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "usage",
+                    "modifiers",
+                    "source"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "const": "media"
+                    },
+                    "usage": {
+                      "enum": [
+                        233,
+                        234,
+                        226,
+                        205,
+                        182,
+                        181
+                      ]
+                    },
+                    "modifiers": {
+                      "const": 0
+                    },
+                    "source": {
+                      "const": 0
                     }
                   }
                 }
