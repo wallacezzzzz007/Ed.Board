@@ -18,6 +18,7 @@ struct BoardView: View {
     @State private var component = "layout"
     @State private var keySelected = false
     @State private var layerMenu = false
+    @State private var layerSearch = ""
     @State private var layerOperation: String?
     @State private var confirmingLayerOperation = false
     @State private var renamingLayer = false
@@ -176,6 +177,8 @@ struct BoardView: View {
     }
     private var keymap: some View {
         HStack(spacing: 0) {
+            extendedSidebar
+            Divider()
             VStack(spacing: 0) {
                 layers.padding(.top, 22).padding(.bottom, 14)
                 Spacer(minLength: 12)
@@ -189,20 +192,6 @@ struct BoardView: View {
                 }
                 Spacer(minLength: 16)
                 saveBar.padding(.horizontal, 24).padding(.bottom, 26)
-                    .overlay(alignment: .bottomLeading) {
-                        Button { layerMenu.toggle() } label: { Image(systemName: "ellipsis.circle").font(.title3) }
-                            .buttonStyle(.plain).accessibilityLabel("Layer options").padding(.leading, 16).padding(.bottom, 10)
-                            .popover(isPresented: $layerMenu, arrowEdge: .top) {
-                                VStack(alignment: .leading, spacing: 12) {
-                                    if model.layer.id != 1 {
-                                        Button(role: .destructive) { layerOperation = "Delete"; layerMenu = false; confirmingLayerOperation = true } label: { Text("Delete").frame(maxWidth: .infinity) }
-                                            .disabled(!model.draft.canDelete(model.layer.id))
-                                        if !model.draft.canDelete(model.layer.id) { Text("Other layers inherit from this layer.").font(.caption).foregroundStyle(.secondary) }
-                                    }
-                                    Button(role: .destructive) { layerOperation = "Reset"; layerMenu = false; confirmingLayerOperation = true } label: { Text("Reset").frame(maxWidth: .infinity) }
-                                }.frame(width: 180).padding(16)
-                            }.disabled(!model.canEdit)
-                    }
             }.frame(maxWidth: .infinity)
             if inspector {
                 Divider()
@@ -211,82 +200,157 @@ struct BoardView: View {
             }
         }
     }
-    private var layers: some View {
-        VStack(spacing: 12) {
-            GeometryReader { space in
-                ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .bottom, spacing: 8) {
-                Text("Layers:").font(.subheadline.weight(.medium)).foregroundStyle(.secondary).frame(height: 32)
-                Button { lighting.toggle() } label: { LayerLightingIndicator(layer: model.layer) }.buttonStyle(.plain)
-                    .disabled(model.layer.mode == .native).accessibilityLabel("Layer lighting")
-                    .accessibilityValue(model.layer.mode == .native ? "Managed by Codex" : "Keys: \(model.layer.keysLight.title), \(String(format: "#%06X", model.layer.color)). Outer Lighting: \(model.layer.outerLight.title), \(String(format: "#%06X", model.layer.ringColor)).")
-                    .popover(isPresented: $lighting, arrowEdge: .bottom) { lightingPanel }
-                Button { linking.toggle() } label: { Image("LayerLink").resizable().scaledToFit().frame(width: 17, height: 17).foregroundStyle(model.selectedAutoRule.enabled ? Color.accentColor : .secondary).frame(width: 32, height: 32).background(.quaternary, in: RoundedRectangle(cornerRadius: 7)) }.buttonStyle(.plain)
-                    .accessibilityLabel("Auto-link applications").popover(isPresented: $linking, arrowEdge: .bottom) { linkPanel }
-                Divider().frame(height: 24).padding(.horizontal, 6).padding(.bottom, 4)
-                HStack(alignment: .bottom, spacing: 8) {
-                ForEach(Array(model.draft.layers.enumerated()), id: \.element.id) { index, layer in
-                    VStack(spacing: 2) {
-                        Image(systemName: "circle.grid.2x3.fill").font(.system(size: 8)).foregroundStyle(.tertiary)
+    private var visibleExtendedLayers: [Layer] {
+        model.draft.extendedLayers.filter { layerSearch.isEmpty || $0.name.localizedCaseInsensitiveContains(layerSearch) }
+    }
+    private var extendedSidebar: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("Extended").font(.system(size: 15, weight: .semibold))
+                Spacer()
+                Button { if model.addLayer(favorite: false) { layerSearch = ""; renamingLayer = true } } label: {
+                    Image(systemName: "plus")
+                }.buttonStyle(.plain).accessibilityLabel("Add extended layer").disabled(!model.canEdit)
+            }
+            TextField("Search layers", text: $layerSearch).textFieldStyle(.roundedBorder)
+                .accessibilityLabel("Search extended layers")
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(visibleExtendedLayers) { layer in
                         Button { clearSelection(); model.selectedLayer = layer.id } label: {
-                            Text(layer.name).font(.system(size: 13, weight: .semibold)).lineLimit(1).frame(maxWidth: 130).padding(.horizontal, 10).frame(height: 32)
-                                .foregroundStyle(model.selectedLayer == layer.id ? Color.white : Color.primary)
-                                .background(model.selectedLayer == layer.id ? Color.accentColor : Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 7))
-                        }.buttonStyle(.plain).simultaneousGesture(TapGesture(count: 2).onEnded { model.selectedLayer = layer.id; renamingLayer = true }).accessibilityLabel("Layer \(index + 1), \(layer.name)")
-                    }
-                    .offset(x: dropTarget == layer.id && dragging != layer.id ? 6 : 0)
-                    .opacity(dragging == layer.id ? 0.4 : 1)
-                    .scaleEffect(dragging == layer.id ? 1.1 : 1)
-                    .overlay(alignment: .leading) {
-                        if dropTarget == layer.id { Capsule().fill(Color.accentColor).frame(width: 3, height: 34).offset(x: -5) }
-                    }
-                    .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.accentColor.opacity(movedLayer == layer.id ? 0.7 : 0), lineWidth: 2).padding(-3))
-                    .onDrag {
-                        clearSelection(); dragging = layer.id
-                        return NSItemProvider(object: "edboard-layer:\(layer.id)" as NSString)
-                    } preview: {
-                        Label(layer.name, systemImage: "square.3.layers").font(.headline).padding(12)
-                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
-                    }
-                    .onDrop(of: [.text], delegate: LayerReorderDrop(model: model, target: layer.id, dragging: $dragging, targetID: $dropTarget, moved: $movedLayer, reduceMotion: reduceMotion))
-                    .contextMenu {
-                        Button("Rename") { model.selectedLayer = layer.id; renamingLayer = true }
-                        Button("Move Left") { clearSelection(); model.selectedLayer = layer.id; withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { model.moveLayer(-1) }; movedLayer = layer.id }.disabled(index == 0)
-                        Button("Move Right") { clearSelection(); model.selectedLayer = layer.id; withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { model.moveLayer(1) }; movedLayer = layer.id }.disabled(index == model.draft.layers.count - 1)
-                        if layer.id != 1 {
-                            Button("Delete layer", role: .destructive) { model.selectedLayer = layer.id; layerOperation = "Delete"; confirmingLayerOperation = true }.disabled(!model.draft.canDelete(layer.id))
+                            HStack {
+                                Text(layer.name).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                                Spacer(minLength: 0)
+                            }.frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 10).padding(.vertical, 10)
+                                .foregroundStyle(model.selectedLayer == layer.id ? Color.white : .primary)
+                                .background(model.selectedLayer == layer.id ? Color.accentColor : Color.clear, in: RoundedRectangle(cornerRadius: 7))
+                                .contentShape(Rectangle())
+                        }.buttonStyle(.plain)
+                            .simultaneousGesture(TapGesture(count: 2).onEnded { model.selectedLayer = layer.id; renamingLayer = true })
+                            .contextMenu { layerContextMenu(layer) }
+                        if layer.id != visibleExtendedLayers.last?.id {
+                            Divider().padding(.horizontal, 10).padding(.vertical, 3)
                         }
                     }
+                    if model.draft.extendedLayers.isEmpty {
+                        Text("Extra layers live here.\nAdd one or move a favorite.")
+                            .font(.caption).foregroundStyle(.secondary).padding(.top, 8)
+                    } else if visibleExtendedLayers.isEmpty {
+                        Text("No matching layers").font(.caption).foregroundStyle(.secondary).padding(.top, 8)
+                    }
                 }
-                Button { clearSelection(); model.addLayer(); renamingLayer = true } label: {
-                    Image(systemName: "plus").frame(width: 32, height: 32).background(.quaternary, in: RoundedRectangle(cornerRadius: 7))
-                }.buttonStyle(.plain).disabled(model.draft.layers.count >= 6).accessibilityLabel("Add layer")
-                }.frame(height: 44, alignment: .bottom)
-            }.fixedSize(horizontal: true, vertical: false)
-                .frame(minWidth: space.size.width, alignment: .center)
+            }
+            Text("\(model.draft.layers.count) / 16 layers").font(.caption).foregroundStyle(.secondary)
+        }.padding(16).frame(width: 180).frame(maxHeight: .infinity)
+            .background(Color.primary.opacity(0.025))
+    }
+    @ViewBuilder private func layerContextMenu(_ layer: Layer) -> some View {
+        Group {
+            let favorite = model.draft.favorites.contains(layer.id)
+            let order = favorite ? model.draft.favorites : model.draft.extendedLayers.map(\.id)
+            let index = order.firstIndex(of: layer.id) ?? 0
+            Button("Rename") { model.selectedLayer = layer.id; renamingLayer = true }
+            Button(favorite ? "Move to Extended" : "Move to Favorites") { model.setLayerFavorite(layer.id, !favorite) }
+            Divider()
+            Button(favorite ? "Move Left" : "Move Up") { model.selectedLayer = layer.id; model.moveLayer(-1) }.disabled(index == 0)
+            Button(favorite ? "Move Right" : "Move Down") { model.selectedLayer = layer.id; model.moveLayer(1) }.disabled(index == order.count - 1)
+            if layer.id != 1 {
+                Button("Delete layer", role: .destructive) { model.selectedLayer = layer.id; layerOperation = "Delete"; confirmingLayerOperation = true }
+                    .disabled(!model.draft.canDelete(layer.id))
+            }
+        }.disabled(!model.canEdit)
+    }
+    private var layers: some View {
+        VStack(spacing: 16) {
+            GeometryReader { space in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        Text("Favorites").font(.system(size: 15, weight: .semibold)).foregroundStyle(.secondary)
+                        Divider().frame(height: 22).padding(.horizontal, 6)
+                        ForEach(model.draft.favoriteLayers) { layer in
+                            Button { clearSelection(); model.selectedLayer = layer.id } label: {
+                                Text(layer.name).font(.system(size: 15, weight: .semibold)).lineLimit(1)
+                                    .frame(maxWidth: 120).padding(.horizontal, 12).frame(height: 34)
+                                    .foregroundStyle(model.selectedLayer == layer.id ? Color.white : .primary)
+                                    .background(model.selectedLayer == layer.id ? Color.accentColor : Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 7))
+                            }.buttonStyle(.plain)
+                                .simultaneousGesture(TapGesture(count: 2).onEnded { model.selectedLayer = layer.id; renamingLayer = true })
+                                .opacity(dragging == layer.id ? 0.4 : 1)
+                                .overlay(alignment: .leading) {
+                                    if dropTarget == layer.id && dragging != layer.id { Capsule().fill(Color.accentColor).frame(width: 3, height: 30).offset(x: -5) }
+                                }
+                                .onDrag {
+                                    clearSelection(); dragging = layer.id
+                                    return NSItemProvider(object: "edboard-layer:\(layer.id)" as NSString)
+                                }
+                                .onDrop(of: [.text], delegate: LayerReorderDrop(model: model, target: layer.id, dragging: $dragging, targetID: $dropTarget, moved: $movedLayer, reduceMotion: reduceMotion))
+                                .contextMenu { layerContextMenu(layer) }
+                        }
+                        Button { if model.addLayer() { renamingLayer = true } } label: {
+                            Image(systemName: "plus").frame(width: 34, height: 34).background(.quaternary, in: RoundedRectangle(cornerRadius: 7))
+                        }.buttonStyle(.plain).accessibilityLabel("Add favorite layer")
+                    }.fixedSize(horizontal: true, vertical: false).frame(minWidth: space.size.width, alignment: .center)
                 }
-            }.frame(height: 44).padding(.horizontal, 18).controlSize(.small).disabled(!model.canEdit)
-                .popover(isPresented: $renamingLayer, arrowEdge: .bottom) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Layer Name").font(.headline)
-                        TextField("Layer name", text: $model.layer.name).textFieldStyle(.roundedBorder).focused($namingLayer).onSubmit { renamingLayer = false }
-                        Button("Done") { renamingLayer = false }.frame(maxWidth: .infinity, alignment: .trailing)
-                    }.padding(18).frame(width: 260).onAppear { DispatchQueue.main.async { namingLayer = true } }
-                }
-                .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: model.draft.layers.map(\.id))
-                .onChange(of: movedLayer) { id in
-                    guard let id else { return }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { if movedLayer == id { movedLayer = nil } }
-                }
+            }.frame(height: 34)
+            GeometryReader { space in
+                // Use the name's natural width; reserve room for the fixed controls on narrow windows.
+                let measured = (model.layer.name as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 15, weight: .semibold)]).width
+                let nameWidth = min(max(32, ceil(measured) + 4), max(32, min(260, space.size.width - 230)))
+                HStack(spacing: 12) {
+                    Text("Editing:").foregroundStyle(.secondary).fixedSize()
+                    Button { renamingLayer = true } label: { Text(model.layer.name).lineLimit(1).truncationMode(.tail).frame(width: nameWidth, alignment: .leading) }
+                        .buttonStyle(.plain).accessibilityLabel("Rename current layer")
+                        .popover(isPresented: $renamingLayer, arrowEdge: .bottom) {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Layer Name").font(.headline)
+                                TextField("Layer name", text: $model.layer.name).textFieldStyle(.roundedBorder).focused($namingLayer).onSubmit { renamingLayer = false }
+                                Button("Done") { renamingLayer = false }.frame(maxWidth: .infinity, alignment: .trailing)
+                            }.padding(18).frame(width: 260).onAppear { DispatchQueue.main.async { namingLayer = true } }
+                        }
+                    Divider().frame(height: 22).padding(.horizontal, 4)
+                    Button { lighting.toggle() } label: { LayerLightingIndicator(layer: model.layer) }.buttonStyle(.plain)
+                        .disabled(model.layer.mode == .native).accessibilityLabel("Layer lighting")
+                        .accessibilityValue(model.layer.mode == .native ? "Managed by Codex" : "Keys: \(model.layer.keysLight.title), \(String(format: "#%06X", model.layer.color)). Outer Lighting: \(model.layer.outerLight.title), \(String(format: "#%06X", model.layer.ringColor)).")
+                        .popover(isPresented: $lighting, arrowEdge: .bottom) { lightingPanel }
+                    Button { linking.toggle() } label: {
+                        Image("LayerLink").resizable().scaledToFit().frame(width: 17, height: 17)
+                            .foregroundStyle(model.selectedAutoRule.enabled ? Color.accentColor : .secondary)
+                            .frame(width: 32, height: 32).background(.quaternary, in: RoundedRectangle(cornerRadius: 7))
+                    }.buttonStyle(.plain).accessibilityLabel("Auto-link applications")
+                        .popover(isPresented: $linking, arrowEdge: .bottom) { linkPanel }
+                    Button { layerMenu.toggle() } label: {
+                        Image(systemName: "ellipsis").frame(width: 32, height: 32).background(.quaternary, in: RoundedRectangle(cornerRadius: 7))
+                    }.buttonStyle(.plain).accessibilityLabel("Layer options")
+                        .popover(isPresented: $layerMenu, arrowEdge: .bottom) {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Button(model.draft.favorites.contains(model.layer.id) ? "Move to Extended" : "Move to Favorites") {
+                                    layerMenu = false; model.setLayerFavorite(model.layer.id, !model.draft.favorites.contains(model.layer.id))
+                                }
+                                Button("Rename") { layerMenu = false; renamingLayer = true }
+                                Divider()
+                                if model.layer.id != 1 {
+                                    Button("Delete", role: .destructive) { layerOperation = "Delete"; layerMenu = false; confirmingLayerOperation = true }
+                                        .disabled(!model.draft.canDelete(model.layer.id))
+                                    if !model.draft.canDelete(model.layer.id) {
+                                        Text(model.draft.favorites == [model.layer.id] ? "Keep at least one favorite." : "Other layers inherit from this layer.")
+                                            .font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                                Button("Reset", role: .destructive) { layerOperation = "Reset"; layerMenu = false; confirmingLayerOperation = true }
+                            }.frame(width: 190, alignment: .leading).padding(16)
+                        }
+                }.font(.system(size: 15, weight: .semibold)).frame(maxWidth: .infinity, alignment: .center)
+            }.frame(height: 32)
             if model.layer.id == 1 {
                 HStack(spacing: 10) {
                     Text("Codex Mode:").font(.callout)
                     Picker("Codex mode", selection: $model.layer.mode) {
                         Text("Native").tag(LayerMode.native); Text("Custom").tag(LayerMode.custom)
-                    }.labelsHidden().pickerStyle(.segmented).frame(width: 180).disabled(!model.canEdit)
+                    }.labelsHidden().pickerStyle(.segmented).frame(width: 180)
                 }
             }
-        }
+        }.padding(.horizontal, 18).controlSize(.small).disabled(!model.canEdit)
     }
     private var lightingPanel: some View {
         LayerLightingPanel(layer: $model.layer, done: { lighting = false }).disabled(model.layer.mode == .native)
@@ -391,9 +455,9 @@ struct BoardView: View {
             }
             Circle().fill(Color(white: 0.14)).frame(width: 47, height: 47)
                 .overlay(Circle().stroke(.white.opacity(model.previewTouch ? 0.8 : 0), lineWidth: 2))
-        }.frame(width: 76, height: 76).accessibilityLabel("Editing layer \(model.layerIndex + 1)")
+        }.frame(width: 76, height: 76).accessibilityLabel("Editing layer \(model.layer.name)")
     }
-    private func led(_ index: Int) -> Bool { [1, 2, 4, 3, 6, 7][model.layerIndex] & (1 << index) != 0 }
+    private func led(_ index: Int) -> Bool { model.draft.indicatorMask(for: model.selectedLayer) & (1 << index) != 0 }
     private var saveBar: some View {
         VStack(spacing: 10) {
             if !model.migrationNotice.isEmpty {
@@ -844,10 +908,10 @@ private struct LayerReorderDrop: DropDelegate {
         _ = provider.loadObject(ofClass: String.self) { object, _ in
             guard object == "edboard-layer:\(source)" else { return }
             Task { @MainActor in
-                guard model.canEdit, let from = model.draft.layers.firstIndex(where: { $0.id == source }),
-                      let to = model.draft.layers.firstIndex(where: { $0.id == target }) else { return }
+                guard model.canEdit, let from = model.draft.favorites.firstIndex(of: source),
+                      let to = model.draft.favorites.firstIndex(of: target) else { return }
                 withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) {
-                    let layer = model.draft.layers.remove(at: from); model.draft.layers.insert(layer, at: to)
+                    let id = model.draft.favorites.remove(at: from); model.draft.favorites.insert(id, at: to)
                     model.selectedLayer = source; moved = source; dragging = nil; targetID = nil
                 }
             }

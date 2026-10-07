@@ -24,7 +24,7 @@ public struct HostCatalog: Codable {
     public var actions: [Int: HostAction] = [:]
     public init(serial: String) { self.serial = serial }
     public var isValid: Bool {
-        version == 1 && !serial.isEmpty && actions.count <= 300
+        version == 1 && !serial.isEmpty && actions.count <= 800
             && actions.allSatisfy { (1...0x7fffffff).contains($0.key) && $0.value.isValid }
     }
 }

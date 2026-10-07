@@ -14,7 +14,7 @@ public struct PresentationCatalog: Codable, Equatable {
     public var keys: [String: KeyPresentation] = [:]
     public init(serial: String = "") { self.serial = serial }
     public var isValid: Bool {
-        version == 1 && serial.utf8.count <= 128 && keys.count <= 150 && keys.allSatisfy { key, value in
+        version == 1 && serial.utf8.count <= 128 && keys.count <= 400 && keys.allSatisfy { key, value in
             let parts = key.split(separator: ":").compactMap { Int($0) }
             return parts.count == 2 && key == parts.map(String.init).joined(separator: ":") && (1...255).contains(parts[0]) && (0..<25).contains(parts[1])
                 && value.name.utf8.count <= 256 && value.symbol.utf8.count <= 128 && (value.image?.count ?? 0) <= 131072

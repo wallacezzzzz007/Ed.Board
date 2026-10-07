@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Ed.Board compact configuration v7",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "payload"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 7
+    },
+    "payload": {
+      "type": "string",
+      "maxLength": 16384,
+      "pattern": "^(?:[0-9a-f]{2})+$",
+      "description": "Little-endian configuration payload version 8; semantic limits are checked by App and firmware. See public/DEVELOPMENT.md."
+    }
+  }
+}

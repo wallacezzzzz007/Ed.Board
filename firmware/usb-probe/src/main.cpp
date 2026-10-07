@@ -316,7 +316,7 @@ void processInputs(uint32_t session) {
     auto state=input_snapshot();
     if(state.fault && !inputFaultSeen) needsSync=true;
     inputFaultSeen=state.fault;
-    if(state.touched && management.automatic_active())touchSuppressed=true;
+    if(state.touched && management.touch_locked())touchSuppressed=true;
     // Local layer selection must also work without a usable HID host. Host
     // input is discarded below; link/epoch changes still require release/resync.
     const bool linkReady=inputLinkReady();
@@ -400,21 +400,20 @@ void processInputs(uint32_t session) {
                 break;
             }
             if(event.down) {
-                touchSuppressed=management.automatic_active();
+                touchSuppressed=management.touch_locked();
                 break;
             }
-            // A touch begun under automatic matching is ignored even if focus
-            // leaves the application before release. Never accumulate fallback steps.
-            if(touchSuppressed||management.automatic_active()) {
+            // Preserve automatic Favorite priority. A touch from Extended instead
+            // returns to the first Favorite without replaying lease renewals.
+            if(touchSuppressed||management.touch_locked()) {
                 touchSuppressed=false;
                 logLine("event=touch_layer_skipped reason=automatic_match manual=%u",management.store.current().manual_layer);
                 break;
             }
             // Switch on release only. Ignore a tap while another control is held.
             if(!event.down&&management.prepare_change&&management.prepare_change()) {
-                const auto &config=management.store.current();size_t index=0;
-                for(size_t i=0;i<config.layers.size();++i)if(config.layers[i].id==config.manual_layer)index=i;
-                management.select_manual(config.layers[(index+1)%config.layers.size()].id);
+                const auto &config=management.store.current();
+                management.select_manual(config.next_favorite(config.active().id));
                 management.finish_change();
                 logLine("event=layer_select source=touch layer=%u",management.store.current().active().id);
                 return;

@@ -24,7 +24,7 @@ Keys, layers, lighting and an eight-direction joystick — configured in one pla
 | Control | Make it yours |
 | --- | --- |
 | Keys & knob | Assign shortcuts and media controls, open apps, URLs or files, and insert text. Add your own names and icons. |
-| Layers | Arrange up to six layers, link them to apps, and inherit actions from other layers. |
+| Layers | Keep up to 16 layers, with up to 6 Favorites for touch switching and searchable Extended layers. Inherit actions across both groups. |
 | Joystick | Map eight directions. A compact desktop wheel shows your choices as you move; return to centre to act or cancel. |
 | Lighting | Adjust key and outer lighting, with per-layer colours and input effects. |
 | Menu bar | Check the connection and battery, open the editor, or leave Ed.Board running in the background. |
@@ -50,11 +50,13 @@ Ed.Board reads the connected keyboard’s configuration. A fresh installation do
 
 ### 3. Make it yours
 
-Open **Keymap**, choose a layer, and select a key, knob or joystick direction to edit. Choose **Save changes** to apply your work, or **Discard changes** to return to the saved configuration.
+Open **Keymap**, choose a Favorite or search the **Extended** sidebar, and select a key, knob or joystick direction to edit. Choose **Save changes** to apply your work, or **Discard changes** to return to the saved configuration.
 
 Choose **Media Control** in Actions, then select **Volume Up**, **Volume Down**, **Mute**, **Play / Pause**, **Previous Track** or **Next Track**. Each knob step triggers one action; joystick actions execute on return to centre.
 
-Link a layer to an application to switch automatically while that app is active. Selecting a layer in the editor only changes what you are editing, not the keyboard’s active layer.
+Use the **+** beside Favorites or Extended to add a layer; use **Editing → •••** or a layer’s context menu to move it between groups. Keep 1–6 Favorites. The touch area cycles only Favorites; Extended layers leave the three layer indicators off.
+
+Link a layer to an application to switch automatically while that app is active. Selecting a layer in the editor only changes what you are editing, not the keyboard’s active layer. An unlinked Extended layer is available for editing only. Touching from an active Extended layer returns to the first Favorite; the same automatic match stays dismissed until the match changes or its session expires.
 
 ## Daily use
 
@@ -66,11 +68,11 @@ Link a layer to an application to switch automatically while that app is active.
 
 ## Firmware
 
-This source tree targets **App 0.5.3 (29) / firmware 0.5.3**, not yet released. Downloaded releases may differ; use the App and firmware supplied together. Media Control requires the new firmware.
+This source tree targets **App 0.6.0 (32) / firmware 0.6.0**, not yet released. Downloaded releases may differ; use the App and firmware supplied together. Expanded layers require the matching new firmware.
 
 Inspired by [AI Micro](https://micro.diyshare.cn/); portions of the firmware are adapted from its code, with the original [MIT license and copyright notice](firmware/usb-probe/src/vendor/LICENSE) retained.
 
-For a recognized, compatible keyboard, connect over **USB**, open **System → Device & Firmware**, and follow **Install required firmware** when offered. Close serial monitors and keep USB connected until verification finishes. The updater backs up settings before writing and does not erase the whole chip.
+For a recognized, compatible keyboard, connect over **USB**, open **System → Device & Firmware**, and follow **Install required firmware** when offered. Close serial monitors and keep USB connected until verification finishes. The updater backs up settings before writing and does not erase the whole chip. Existing layers retain their order and become Favorites. After saving in 0.6.0, older firmware cannot read the new snapshot; use a verified backup for a deliberate downgrade.
 
 This is an updater for compatible devices, **not a universal factory installer**. A keyboard running unrecognized firmware may need a separate initial installation procedure; do not flash this package onto a different board or bypass a compatibility check.
 

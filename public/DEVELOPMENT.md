@@ -2,14 +2,15 @@
 
 [README](../README.md) · [Third-party notices](THIRD_PARTY_NOTICES.md) · [License](../LICENSE)
 
-Ed.Board contains a native SwiftUI/AppKit App, a local Swift package and ESP-IDF firmware. Source versions: **App 0.5.3 (29)** and **firmware 0.5.3** (not yet released). Run the commands below from the repository root.
+Ed.Board contains a native SwiftUI/AppKit App, a local Swift package and ESP-IDF firmware. Source versions: **App 0.6.0 (32)** and **firmware 0.6.0** (not yet released). Run the commands below from the repository root.
 
-## Changes since 0.5.1
+## Changes since 0.5.3
 
-- Fix the desktop joystick wheel for valid layer IDs above 6; the six-layer limit applies to count, not ID.
-- Add six Media Control actions with inherited/custom presentation and USB/Bluetooth Consumer reports.
-- Preserve existing configuration when reading older storage; write and verify new settings using `snapshot7` (binary format 7). Older snapshots are retained, so downgrading firmware may expose stale settings rather than the latest configuration.
-- Keep external protocol 1/schema 6 and add `mediaVersion: 1` capability detection. Older Apps cannot edit configurations containing the new media action.
+- Support 16 layers including Codex, with 1–6 ordered Favorites and a searchable Extended sidebar. Moving categories keeps IDs, bindings, appearance and app links.
+- Editing a layer never changes the keyboard runtime. Touch cycles Favorites; Extended has no layer indicator lights. An Extended automatic layer can be dismissed by touch until its match changes, lease expires or a new session begins. Favorite automatic layers retain their existing priority.
+- Start a fresh live-preview session when reopening Keymap so background key presses are not replayed as highlights.
+- Use configuration schema 7 and compact NVS `snapshot8`; read legacy snapshots without changing bindings or order, and migrate their layers to Favorites. The partition layout, USB/Bluetooth HID reports and runtime/preview/joystick/power versions are unchanged.
+- Commit and read back the new snapshot before reclaiming older snapshot keys. A cleanup failure leaves the latest verified configuration readable and disables further writes until cleanup succeeds. Older firmware cannot read settings saved in this format; restore a verified backup for an intentional downgrade.
 
 Disabled keys use the destination layer’s key lighting. Selecting Disabled removes the key’s custom lighting, name and icon (including custom images) from the draft; choosing another action does not restore it. Discard restores the saved configuration. Inherited Disabled actions and legacy Disabled overrides also render with destination-layer lighting.
 
@@ -71,6 +72,23 @@ Media Control requires firmware advertising `mediaVersion: 1`. It adds Consumer 
 
 These tests do not replace device testing. Check USB and Bluetooth, save/discard, layer inheritance, app matching, joystick feedback, sleep/wake reconnection and menu-bar/Dock behavior on hardware.
 
+## Compact configuration
+
+Schema 7 JSON has exactly two fields: `{"schemaVersion":7,"payload":"<lowercase hex>"}`. The payload is binary version 8, using little-endian integers. Decoders validate the complete graph, field ranges, UTF-8, exact payload length and Codex component protection. Schema 4–6 JSON and persisted snapshots 1–7 remain read-only migration inputs. Synthetic fixtures cover both formats.
+
+| Part | Bytes / encoding |
+| --- | --- |
+| Header | version `8`, layer count (1–16), favorite count (1–6), then ordered favorite IDs; each value is one byte |
+| Layer | ID, UTF-8 name byte count, name (1–48 bytes), native flag, key RGB (3), outer RGB (3), brightness, five effect bytes (`255` represents outer brightness `-1`) |
+| Bindings | 25 records; header low nibble is kind (native/shortcut/disabled/inherit/application/open/text/cancel/media = 0…8), high nibble is ordered chord count (0–14) |
+| Binding data | Shortcut: count > 0 means that many usage bytes, otherwise usage + modifiers. Inherit: source ID byte. Application/open/text: 4-byte host ID. Media: usage byte. Other kinds: no data |
+| Key lighting | 13 records; `0` uses layer lighting, otherwise `128 OR effect`, followed by RGB (3), brightness and active brightness |
+| NVS only | Insert the 4-byte revision immediately after version; runtime selection is not persisted in the payload |
+
+The worst allowed 16-layer configuration occupies **8,101 bytes** including the NVS revision, within the unchanged 8,192-byte snapshot limit. Hex transport stays within the existing 32,768-byte frame limit. Real NVS page allocation, repeated large saves and interrupted migration still require hardware testing; host tests use a bounded fake NVS and do not emulate flash wear or page garbage collection. No idle polling or telemetry stream is added.
+
+Validation should cover legacy configuration preservation, 16-layer save/read/restart, Favorites limits/order, cross-category inheritance, application matching, Extended touch return and all-off layer LEDs. Also test USB/Bluetooth save/discard, desktop joystick feedback and sleep/wake behavior. Local action catalogs allow 400 controls plus up to 400 previous IDs while staging a save; the appearance file retains its 12 MB size ceiling.
+
 ## Prepare a DMG
 
 Use a clean checkout and fresh build products for distribution. The following prepares a locally signed candidate; it does **not** provide Developer ID signing or notarization.
@@ -86,8 +104,8 @@ codesign --force --deep --sign - --timestamp=none app/DerivedData/ReleasePackage
 codesign --verify --deep --strict app/DerivedData/ReleasePackage/Ed.Board.app
 python3 tools/release/package_dmg.py \
   app/DerivedData/ReleasePackage/Ed.Board.app \
-  app/DerivedData/ReleasePackage/Ed.Board-0.5.3-macOS-arm64-candidate.dmg
-shasum -a 256 app/DerivedData/ReleasePackage/Ed.Board-0.5.3-macOS-arm64-candidate.dmg
+  app/DerivedData/ReleasePackage/Ed.Board-0.6.0-macOS-arm64-candidate.dmg
+shasum -a 256 app/DerivedData/ReleasePackage/Ed.Board-0.6.0-macOS-arm64-candidate.dmg
 ```
 
 Use a fresh `ReleasePackage` directory each time; do not merge an old App bundle into a new one. The DMG tool refuses to overwrite an existing output. It verifies image checksums, mounts the image read-only at a system-selected location, compares App contents and signatures, and then detaches it. It neither launches nor installs the App.

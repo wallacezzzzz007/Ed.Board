@@ -125,21 +125,29 @@ extension Layer {
     }
 }
 public struct BoardConfiguration: Codable, Equatable {
-    public var schemaVersion = 6
+    public var schemaVersion = 7
+    public var favorites: [Int] = [1]
     public var layers: [Layer] = [Layer()]
 
     /// Preserve an existing editor selection; otherwise use display order, not Codex identity.
     public func editorLayer(preferred: Int) -> Int {
-        layers.contains(where: { $0.id == preferred }) ? preferred : (layers.first?.id ?? 1)
+        layers.contains(where: { $0.id == preferred }) ? preferred : startupLayerID
     }
 
     public init() {}
-    enum CodingKeys: String, CodingKey { case schemaVersion, layers }
+    enum CodingKeys: String, CodingKey { case schemaVersion, layers, payload }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let version = try c.decode(Int.self, forKey: .schemaVersion)
-        schemaVersion = (4...5).contains(version) ? 6 : version
+        if version == 7 {
+            self = try BoardConfiguration(compactPayload: c.decode(String.self, forKey: .payload))
+            return
+        }
+        guard (4...6).contains(version) else { throw RPCError(code: "unsupported_schema") }
+        schemaVersion = 7
         layers = try c.decode([Layer].self, forKey: .layers)
+        guard (1...6).contains(layers.count) else { throw RPCError(code: "invalid_config") }
+        favorites = Array(layers.prefix(6).map(\.id))
         if (4...5).contains(version) {
             for i in layers.indices where layers[i].bindings.count == 20 {
                 layers[i].bindings += Array(repeating: Binding(kind: .disabled), count: 5)
@@ -151,10 +159,45 @@ public struct BoardConfiguration: Codable, Equatable {
             }
         }
     }
-    public var startupLayerID: Int { layers.first?.id ?? 1 }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(schemaVersion, forKey: .schemaVersion)
+        try c.encode(compactPayload(), forKey: .payload)
+    }
+    public var favoriteLayers: [Layer] { favorites.compactMap { id in layers.first { $0.id == id } } }
+    public var extendedLayers: [Layer] { layers.filter { !favorites.contains($0.id) } }
+    public mutating func setFavorite(_ id: Int, enabled: Bool) -> Bool {
+        guard layers.contains(where: { $0.id == id }) else { return false }
+        if enabled {
+            if favorites.contains(id) { return true }
+            guard favorites.count < 6 else { return false }
+            favorites.append(id)
+        } else {
+            guard favorites.contains(id), favorites.count > 1 else { return false }
+            favorites.removeAll { $0 == id }
+        }
+        return true
+    }
+    public func nextFavorite(after id: Int) -> Int {
+        guard let index = favorites.firstIndex(of: id) else { return startupLayerID }
+        return favorites[(index + 1) % favorites.count]
+    }
+    public var startupLayerID: Int { favorites.first ?? 1 }
+    public func indicatorMask(for id: Int) -> Int {
+        guard let index = favorites.firstIndex(of: id), index < 6 else { return 0 }
+        return [1, 2, 4, 3, 6, 7][index]
+    }
     public mutating func moveLayer(_ id: Int, offset: Int) {
-        guard let index = layers.firstIndex(where: { $0.id == id }), layers.indices.contains(index + offset) else { return }
-        layers.swapAt(index, index + offset)
+        if let index = favorites.firstIndex(of: id) {
+            guard favorites.indices.contains(index + offset) else { return }
+            favorites.swapAt(index, index + offset)
+        } else {
+            let extended = extendedLayers.map(\.id)
+            guard let index = extended.firstIndex(of: id), extended.indices.contains(index + offset),
+                  let a = layers.firstIndex(where: { $0.id == id }),
+                  let b = layers.firstIndex(where: { $0.id == extended[index + offset] }) else { return }
+            layers.swapAt(a, b)
+        }
     }
     public func resolved(layer: Int, control: Int) -> Binding? {
         guard (0..<25).contains(control) else { return nil }
@@ -169,7 +212,9 @@ public struct BoardConfiguration: Codable, Equatable {
         return nil
     }
     public var validationError: String? {
-        guard schemaVersion == 6, (1...6).contains(layers.count) else { return "Unsupported configuration or layer count (1–6)." }
+        guard schemaVersion == 7, (1...16).contains(layers.count) else { return "Unsupported configuration or layer count (1–16)." }
+        guard (1...6).contains(favorites.count), Set(favorites).count == favorites.count,
+              favorites.allSatisfy({ id in layers.contains { $0.id == id } }) else { return "Keep 1–6 distinct favorite layers." }
         let ids = Set(layers.map { $0.id })
         guard ids.count == layers.count, ids.contains(1) else { return "Invalid layer identity or missing Codex layer." }
         for layer in layers {
@@ -204,13 +249,14 @@ public struct BoardConfiguration: Codable, Equatable {
     }
     public var isValid: Bool { validationError == nil }
     public func canDelete(_ id: Int) -> Bool {
-        id != 1 && layers.contains(where: { $0.id == id }) && !layers.contains { layer in
+        id != 1 && !(favorites == [id]) && layers.contains(where: { $0.id == id }) && !layers.contains { layer in
             layer.id != id && layer.bindings.contains { $0.kind == .inherit && $0.source == id }
         }
     }
     public mutating func deleteLayer(_ id: Int) {
         guard canDelete(id) else { return }
         layers.removeAll { $0.id == id }
+        favorites.removeAll { $0 == id }
     }
 }
 public struct Snapshot: Codable, Equatable {
@@ -239,7 +285,7 @@ public struct DeviceInfo: Decodable {
     public let batteryValid: Bool
     public let battery: Int
     public let charging: Bool
-    public var isCompatible: Bool { device == "Ed.Board" && schemaVersion == 6 && runtimeVersion == 2 && controlId == "board.layers" }
+    public var isCompatible: Bool { device == "Ed.Board" && schemaVersion == 7 && runtimeVersion == 2 && controlId == "board.layers" }
 }
 
 public struct HIDKey: Identifiable {
@@ -271,7 +317,7 @@ public struct RuntimeState: Decodable, Equatable {
     public let pending: Bool?
     public func isValid(for config: BoardConfiguration) -> Bool {
         let ids = Set(config.layers.map(\.id))
-        guard ids.contains(manualLayer), ids.contains(activeLayer) else { return false }
+        guard config.favorites.contains(manualLayer), ids.contains(activeLayer) else { return false }
         if let autoLayer, autoLayer != 0 && !ids.contains(autoLayer) { return false }
         if let session, !(0...0x7fffffff).contains(session) { return false }
         if let pending, !pending, activeLayer != ((autoLayer ?? 0) == 0 ? manualLayer : autoLayer!) { return false }

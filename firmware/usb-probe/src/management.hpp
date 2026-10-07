@@ -3,6 +3,7 @@
 #include "power.hpp"
 #include "inputs.hpp"
 #include "quick_overlay.hpp"
+#include "auto_layer_policy.hpp"
 #include <functional>
 #include <string>
 #include <deque>
@@ -20,6 +21,7 @@ public:
     void tick(uint32_t epoch,bool available,bool bluetooth=false);
     void select_manual(unsigned id);
     bool automatic_active() const;
+    bool touch_locked() const;
     bool pending() const {return !out_.empty();}
     void trigger_host(unsigned control, Binding binding);
     QuickOverlay quick_overlay; // Main loop owns both producer and transport.
@@ -44,6 +46,7 @@ private:
     uint64_t notified_state_=UINT64_MAX;
     uint32_t auto_session_=0, auto_sequence_=0;
     unsigned auto_layer_=0;
+    AutoLayerPolicy auto_policy_;
     int64_t auto_deadline_=0;
     void reconcile();
     cJSON *runtime_json() const;

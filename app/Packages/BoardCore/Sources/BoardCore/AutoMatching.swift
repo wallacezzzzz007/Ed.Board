@@ -22,7 +22,7 @@ public struct AutoBindings: Codable, Equatable {
     public var isValid: Bool {
         guard version == 1, devices.count <= 16 else { return false }
         for (serial, rules) in devices {
-            guard !serial.isEmpty, serial.utf8.count <= 128, rules.count <= 6,
+            guard !serial.isEmpty, serial.utf8.count <= 128, rules.count <= 16,
                   Set(rules.map(\.layer)).count == rules.count else { return false }
             var ids = Set<String>()
             for rule in rules {

@@ -68,7 +68,7 @@ def run(port, clear_bonds):
             return reply["result"]
 
         info = result("device.info", {})
-        if info.get("device") != "Ed.Board" or info.get("schemaVersion") not in (3, 4, 5, 6):
+        if info.get("device") != "Ed.Board" or info.get("schemaVersion") not in (3, 4, 5, 6, 7):
             raise RuntimeError("Unexpected device identity/schema; no changes made")
         baseline = result("config.get", {})
         status = result("bluetooth.status", {})

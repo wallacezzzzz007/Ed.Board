@@ -371,12 +371,24 @@ final class BoardModel: ObservableObject {
         for id in Control.stickIDs { directBindings.removeValue(forKey: "\(selectedLayer):\(id)") }
         pruneHostDraft(); errorText = nil
     }
-    func addLayer() {
-        guard canEdit, draft.layers.count < 6 else { return }
+    @discardableResult func addLayer(favorite: Bool = true) -> Bool {
+        guard canEdit else { return false }
+        guard draft.layers.count < 16 else { errorText = "You can keep up to 16 layers, including Codex."; return false }
+        guard !favorite || draft.favorites.count < 6 else { errorText = "Favorites is full (6). Move a favorite to Extended first."; return false }
         let used = Set(draft.layers.map(\.id) + (snapshot?.config.layers.map(\.id) ?? []))
         let id = (2...255).first { !used.contains($0) }!
         draft.layers.append(Layer.blank(id: id, name: "Layer \(id)"))
-        selectedLayer = id
+        if favorite { draft.favorites.append(id) }
+        selectedLayer = id; errorText = nil
+        return true
+    }
+    func setLayerFavorite(_ id: Int, _ enabled: Bool) {
+        guard canEdit else { return }
+        guard draft.setFavorite(id, enabled: enabled) else {
+            errorText = enabled ? "Favorites is full (6). Move a favorite to Extended first." : "Keep at least one favorite for touch switching."
+            return
+        }
+        errorText = nil
     }
     func resetLayer() {
         guard canEdit else { return }
@@ -393,11 +405,11 @@ final class BoardModel: ObservableObject {
         presentation.removeLayer(removed)
         directBindings = directBindings.filter { !$0.key.hasPrefix("\(removed):") }
         autoDraft.devices[info?.serial ?? ""]?.removeAll { $0.layer == removed }
-        draft.deleteLayer(removed); selectedLayer = 1
+        draft.deleteLayer(removed); selectedLayer = draft.startupLayerID
     }
     func moveLayer(_ offset: Int) { guard canEdit else { return }; draft.moveLayer(layer.id, offset: offset) }
     func selectManualLayer(_ id: Int) {
-        guard canEdit, !dirty, snapshot?.config.layers.contains(where: { $0.id == id }) == true else { return }
+        guard canEdit, !dirty, snapshot?.config.favorites.contains(id) == true else { return }
         errorText = nil
         request("runtime.select", params: SelectLayerParams(layer: id))
     }
@@ -677,7 +689,7 @@ final class BoardModel: ObservableObject {
                 if result.writable != true { errorText = "Storage is read-only: \(result.storageError ?? "unknown"). Check the log before retrying." }
                 expected = nil; preserveDraftOnRead = false; writeNotice = nil
                 if !didChooseInitialEditorLayer || !draft.layers.contains(where: { $0.id == selectedLayer }) {
-                    selectedLayer = draft.layers.first?.id ?? 1
+                    selectedLayer = draft.startupLayerID
                     didChooseInitialEditorLayer = true
                 }
                 lastAutoLayer = -1; configureAutoTimer(); readRuntime()
@@ -941,7 +953,7 @@ extension BoardModel {
         guard let url = hostURL else { hostReadable = false; return }
         guard FileManager.default.fileExists(atPath: url.path) else { return }
         do {
-            guard (try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0) <= 2_000_000 else { throw RPCError(code: "host_file_too_large") }
+            guard (try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0) <= 20_000_000 else { throw RPCError(code: "host_file_too_large") }
             let catalog = try JSONDecoder().decode(HostCatalog.self, from: Data(contentsOf: url))
             guard catalog.serial == serial, catalog.isValid else { throw RPCError(code: "invalid_host_catalog") }
             hostSaved = catalog.actions; hostDraft = catalog.actions
@@ -963,7 +975,7 @@ extension BoardModel {
         guard catalog.isValid, hostDraftValid else { errorText = "Complete the host action settings before saving."; return false }
         do {
             let data = try JSONEncoder().encode(catalog)
-            guard data.count <= 2_000_000 else { throw RPCError(code: "host_file_too_large") }
+            guard data.count <= 20_000_000 else { throw RPCError(code: "host_file_too_large") }
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try data.write(to: url, options: .atomic)
             hostSaved = catalog.actions; pruneHostDraft()
@@ -1028,7 +1040,9 @@ extension BoardModel {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             // Stage separately so failed device writes do not change the committed appearance.
             let target = markSaved ? url : url.appendingPathExtension("pending")
-            try JSONEncoder().encode(presentation).write(to: target, options: .atomic)
+            let data = try JSONEncoder().encode(presentation)
+            guard data.count < 12_000_000 else { throw RPCError(code: "appearance_too_large") }
+            try data.write(to: target, options: .atomic)
             if markSaved { savedPresentation = presentation }
             return true
         } catch { errorText = "Could not save key names and images. Your draft is retained."; return false }
@@ -1130,7 +1144,12 @@ extension BoardModel {
     func setPreviewVisible(_ visible: Bool) {
         guard previewVisible != visible else { return }
         previewVisible = visible
-        if !visible { resetPreview(); if connected, pending == nil, info?.previewVersion == 1 { request("preview.watch", params: PreviewWatch(token: previewToken, enabled: false)) } }
+        // A stop request may have already installed the previous token while hidden.
+        // Rotate again on entry so firmware drops accumulated press edges before streaming.
+        resetPreview()
+        if !visible, connected, pending == nil, info?.previewVersion == 1 {
+            request("preview.watch", params: PreviewWatch(token: previewToken, enabled: false))
+        }
     }
     func previewTick() {
         guard previewVisible, !sleeping, connected, snapshot != nil, info?.previewVersion == 1 else { return }
@@ -1208,7 +1227,7 @@ extension BoardModel {
     }
     var firmwareMismatch: Bool {
         guard let device = firmwareIdentity else { return false }
-        return device.firmware != FirmwareUpdater.required || device.schemaVersion != 6 || device.runtimeVersion != 2
+        return device.firmware != FirmwareUpdater.required || device.schemaVersion != 7 || device.runtimeVersion != 2
     }
     var firmwareReady: Bool { firmwareIdentity != nil && !firmwareMismatch && !firmware.blocksEditor }
     var canBeginFirmware: Bool {
@@ -1217,7 +1236,7 @@ extension BoardModel {
     }
     func startFirmwareUpdate() {
         guard canBeginFirmware else { return }
-        if let identity = firmwareIdentity, !(2...6).contains(identity.schemaVersion) {
+        if let identity = firmwareIdentity, !(2...7).contains(identity.schemaVersion) {
             firmware.fail("This configuration version cannot be safely installed by this app. Use a matching newer app; no firmware was written."); return
         }
         let identity = firmwareIdentity?.serial ?? firmware.record?.serial

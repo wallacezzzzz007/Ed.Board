@@ -19,6 +19,7 @@ cJSON *Management::runtime_json() const {
     cJSON_AddBoolToObject(r,"pending",c.active().id!=(auto_layer_?auto_layer_:c.manual_layer));return r;
 }
 void Management::reconcile() {
+    if(esp_timer_get_time()>=auto_deadline_)auto_policy_.reset();
     if(auto_layer_&&(esp_timer_get_time()>=auto_deadline_||!store.current().layer(auto_layer_)))auto_layer_=0;
     unsigned target=auto_layer_?auto_layer_:store.current().manual_layer;
     if(target!=store.current().active().id&&prepare_change&&prepare_change()){
@@ -28,7 +29,14 @@ void Management::reconcile() {
 bool Management::automatic_active() const {
     return auto_layer_ && esp_timer_get_time() < auto_deadline_;
 }
+bool Management::touch_locked() const {
+    return automatic_active() && store.current().favorite_index(store.current().active().id)>=0;
+}
 void Management::select_manual(unsigned id) {
+    if(store.current().favorite_index(id)<0)return;
+    if(automatic_active()&&store.current().favorite_index(store.current().active().id)<0) {
+        auto_policy_.dismiss(auto_layer_);auto_layer_=0;
+    }
     store.select(id);
     if(auto_layer_&&esp_timer_get_time()>=auto_deadline_)auto_layer_=0;
     store.activate(auto_layer_?auto_layer_:store.current().manual_layer);
@@ -106,7 +114,7 @@ void Management::dispatch(const std::string &line) {
         if(diagnostic_reader)diagnostic_reader();
         auto *r=cJSON_CreateObject();cJSON_AddStringToObject(r,"device","Ed.Board");
         cJSON_AddStringToObject(r,"serial",serial_);cJSON_AddStringToObject(r,"firmware",esp_app_get_description()->version);
-        cJSON_AddStringToObject(r,"controlId","board.layers");cJSON_AddNumberToObject(r,"schemaVersion",6);cJSON_AddStringToObject(r,"migrationNote",store.current().migration_note.c_str());cJSON_AddNumberToObject(r,"runtimeVersion",2);cJSON_AddNumberToObject(r,"previewVersion",1);cJSON_AddNumberToObject(r,"joystickVersion",1);cJSON_AddNumberToObject(r,"mediaVersion",1);cJSON_AddNumberToObject(r,"powerVersion",2);
+        cJSON_AddStringToObject(r,"controlId","board.layers");cJSON_AddNumberToObject(r,"schemaVersion",7);cJSON_AddStringToObject(r,"migrationNote",store.current().migration_note.c_str());cJSON_AddNumberToObject(r,"runtimeVersion",2);cJSON_AddNumberToObject(r,"previewVersion",1);cJSON_AddNumberToObject(r,"joystickVersion",1);cJSON_AddNumberToObject(r,"mediaVersion",1);cJSON_AddNumberToObject(r,"powerVersion",2);
         cJSON_AddBoolToObject(r,"writable",store.writable());cJSON_AddStringToObject(r,"storageError",store.error().c_str());
         auto state=input_snapshot();cJSON_AddBoolToObject(r,"ready",state.ready&&!state.fault);
         cJSON_AddBoolToObject(r,"batteryValid",state.battery_valid);
@@ -162,7 +170,7 @@ void Management::dispatch(const std::string &line) {
     } else if(!strcmp(method->valuestring,"runtime.begin")&&exact_fields(params,nullptr,0)) {
         uint32_t previous=auto_session_;
         do {auto_session_=(esp_random()&0x7fffffffU);} while(!auto_session_||auto_session_==previous);
-        auto_sequence_=0;host_sequence_=0;host_events_.clear();auto_deadline_=0;auto_layer_=0;reconcile();respond(request,runtime_json());
+        auto_sequence_=0;host_sequence_=0;host_events_.clear();auto_deadline_=0;auto_layer_=0;auto_policy_.reset();reconcile();respond(request,runtime_json());
     } else if(!strcmp(method->valuestring,"runtime.auto")) {
         const char *f[]={"session","sequence","layer","baseRevision"};
         auto *token=cJSON_GetObjectItemCaseSensitive(params,"session");
@@ -173,11 +181,11 @@ void Management::dispatch(const std::string &line) {
         else if(!auto_session_||uint32_t(token->valuedouble)!=auto_session_||uint32_t(sequence->valuedouble)<=auto_sequence_)respond(request,nullptr,"stale_auto_session");
         else if(uint32_t(base->valuedouble)!=store.current().revision)respond(request,nullptr,"revision_conflict");
         else if(layer->valueint&&!store.current().layer(layer->valueint))respond(request,nullptr,"invalid_layer");
-        else {auto_sequence_=uint32_t(sequence->valuedouble);auto_layer_=layer->valueint;
+        else {auto_sequence_=uint32_t(sequence->valuedouble);if(esp_timer_get_time()>=auto_deadline_)auto_policy_.reset();auto_layer_=auto_policy_.accept(layer->valueint);
             auto_deadline_=esp_timer_get_time()+8000000;reconcile();respond(request,runtime_json());}
     } else if(!strcmp(method->valuestring,"runtime.select")) {
         const char *f[]={"layer"};auto *id=cJSON_GetObjectItemCaseSensitive(params,"layer");
-        if(!exact_fields(params,f,1)||!valid_integer(id,255)||!store.current().layer(id->valueint))respond(request,nullptr,"invalid_layer");
+        if(!exact_fields(params,f,1)||!valid_integer(id,255)||store.current().favorite_index(id->valueint)<0)respond(request,nullptr,"invalid_layer");
         else if(input_snapshot().fault)respond(request,nullptr,"input_fault");
         else if(!input_snapshot().ready)respond(request,nullptr,"inputs_not_ready");
         else if(!prepare_change||!prepare_change()) {
@@ -189,7 +197,9 @@ void Management::dispatch(const std::string &line) {
     } else if(!strcmp(method->valuestring,"config.set")) {
         const char *setFields[]={"baseRevision","config"};Configuration configuration;
         auto *base=cJSON_GetObjectItemCaseSensitive(params,"baseRevision");
+        auto *schema=cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(params,"config"),"schemaVersion");
         if(!exact_fields(params,setFields,2)||!valid_integer(base,0x7fffffff)||
+           !valid_integer(schema,7)||schema->valueint!=7||
            !decode_config(cJSON_GetObjectItemCaseSensitive(params,"config"),configuration))respond(request,nullptr,"invalid_config");
         else if(uint32_t(base->valuedouble)!=store.current().revision)respond(request,nullptr,"revision_conflict");
         else if(!store.writable())respond(request,nullptr,"storage_unavailable");
@@ -202,7 +212,7 @@ void Management::dispatch(const std::string &line) {
         }
         else {
             bool saved=store.save(configuration);
-            if(saved){auto_layer_=0;host_events_.clear();}
+            if(saved){auto_layer_=0;auto_policy_.reset();host_events_.clear();}
             if(finish_change)finish_change();
             if(saved)respond(request,encode_snapshot(store.current()));
             else respond(request,nullptr,"storage_write_failed");
@@ -235,7 +245,7 @@ void Management::trigger_host(unsigned control,Binding binding) {
 }
 void Management::tick(uint32_t epoch,bool mounted,bool bluetooth) {
     bluetooth_=bluetooth;available_=mounted;
-    if(epoch_!=epoch||!mounted){epoch_=epoch;quick_token_=0;quick_queued_=false;quick_started_=false;quick_overlay=QuickOverlay{};preview_deadline_=0;preview_token_=0;notified_state_=UINT64_MAX;auto_layer_=0;auto_session_=0;host_events_.clear();store.activate(store.current().manual_layer);line_.clear();out_.clear();discard_=false;rx_size_=rx_offset_=0;tud_cdc_n_read_flush(0);return;}
+    if(epoch_!=epoch||!mounted){epoch_=epoch;quick_token_=0;quick_queued_=false;quick_started_=false;quick_overlay=QuickOverlay{};preview_deadline_=0;preview_token_=0;notified_state_=UINT64_MAX;auto_layer_=0;auto_session_=0;auto_policy_.reset();host_events_.clear();store.activate(store.current().manual_layer);line_.clear();out_.clear();discard_=false;rx_size_=rx_offset_=0;tud_cdc_n_read_flush(0);return;}
     reconcile(); // Lease expiration must not wait behind a pending CDC response.
     auto now=esp_timer_get_time();
     // Discard an unsent movement snapshot when the gesture has already ended.

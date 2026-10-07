@@ -15,7 +15,7 @@ import time
 import tty
 
 ROOT = Path(__file__).resolve().parents[1]
-FIXTURES = json.loads((ROOT / "protocol/fixtures/management-v6.json").read_text())
+FIXTURES = json.loads((ROOT / "protocol/fixtures/management-v7.json").read_text())
 
 
 def run(port):
@@ -70,7 +70,7 @@ def run(port):
             raise RuntimeError("request timeout: " + method)
 
         info = rpc("device.info", {})["result"]
-        assert info["device"] == "Ed.Board" and info["schemaVersion"] == 6, info
+        assert info["device"] == "Ed.Board" and info["schemaVersion"] == 7, info
         assert info.get("runtimeVersion") == 2, info
         baseline = rpc("config.get", {}, fragmented=True)["result"]
         assert baseline["writable"], baseline
@@ -83,8 +83,10 @@ def run(port):
             assert reply["error"]["code"] == "invalid_config", reply
         for nested in (False, True):
             config = copy.deepcopy(FIXTURES["validConfig"])
-            target = config["layers"][0]["bindings"][0] if nested else config
-            target["unknown"] = True
+            if nested:
+                config["payload"] += "00"
+            else:
+                config["unknown"] = True
             reply = rpc("config.set", {"baseRevision": revision, "config": config})
             assert reply["error"]["code"] == "invalid_config", reply
         wrong_revision = revision - 1 if revision else 1
@@ -95,7 +97,9 @@ def run(port):
             state = rpc("runtime.get", {})["result"]
             manual = state["manualLayer"]
             session = rpc("runtime.begin", {})["result"]["session"]
-            candidate = next((l["id"] for l in baseline["config"]["layers"] if l["id"] != manual), manual)
+            payload = bytes.fromhex(baseline["config"]["payload"])
+            favorites = payload[3:3 + payload[2]]
+            candidate = next((id for id in favorites if id != manual), manual)
             params = {"session": session, "sequence": 1, "layer": candidate, "baseRevision": revision}
             applied = rpc("runtime.auto", params)["result"]
             assert applied["activeLayer"] == candidate and applied["manualLayer"] == manual and not applied["pending"], applied
@@ -119,7 +123,7 @@ def run(port):
             print("PASS: automatic priority, replay/revision/field/session rejection and lease expiry; manual layer preserved.", flush=True)
         final = rpc("config.get", {})["result"]
         assert final == baseline, (baseline, final)
-        print("PASS: v3 fragmented read, layer/field/cycle rejection and maximum-config revision conflict; configuration unchanged.", flush=True)
+        print("PASS: v7 fragmented read, layer/field/cycle rejection and maximum-config revision conflict; configuration unchanged.", flush=True)
     finally:
         os.close(fd)
 

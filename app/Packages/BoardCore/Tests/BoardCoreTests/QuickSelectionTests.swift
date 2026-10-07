@@ -18,7 +18,7 @@ final class QuickSelectionTests: XCTestCase {
         XCTAssertEqual(linked.layers[2].bindings[13], original.layers[2].bindings[13])
         let decoded = try JSONDecoder().decode(BoardConfiguration.self, from: JSONEncoder().encode(linked))
         XCTAssertEqual(decoded, linked)
-        XCTAssertEqual(decoded.schemaVersion, 6)
+        XCTAssertEqual(decoded.schemaVersion, 7)
         var edited = linked
         edited.layers[1].bindings[21] = Binding(kind: .disabled)
         XCTAssertEqual(edited.resolved(layer: 3, control: 21)?.kind, .disabled)

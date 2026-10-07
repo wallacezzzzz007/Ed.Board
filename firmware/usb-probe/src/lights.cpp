@@ -128,9 +128,8 @@ esp_err_t render_lights(const aim::Lights &lights,int64_t now,bool connected,con
         }
     }
     // Physical order is top, middle, bottom; outputs are active low.
-    constexpr unsigned masks[]={1,2,4,3,6,7};size_t index=0;
-    for(size_t i=0;i<config.layers.size();++i)if(config.layers[i].id==layer.id)index=i;
-    for(unsigned i=0;i<3;++i)gpio_set_level(indicators[i],(pairing ? ((now/300)%2!=0) : (masks[index]&(1U<<i))!=0)?0:1);
+    constexpr unsigned masks[]={1,2,4,3,6,7};int index=config.favorite_index(layer.id);
+    for(unsigned i=0;i<3;++i)gpio_set_level(indicators[i],(pairing ? ((now/300)%2!=0) : (index>=0&&(masks[index]&(1U<<i))!=0))?0:1);
     return show();
 }
 

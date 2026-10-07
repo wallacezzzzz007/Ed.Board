@@ -5,6 +5,7 @@ final class ControlMappingTests: XCTestCase {
     func testDiscardNewLayerRestoresValidEditorSelection() {
         var saved = BoardConfiguration()
         saved.layers.insert(Layer.blank(id: 2, name: "Work"), at: 0)
+        saved.favorites = [2, 1]
         var draft = saved
         draft.layers.append(Layer.blank(id: 3, name: "New"))
         var selected = 3
@@ -54,7 +55,7 @@ final class ControlMappingTests: XCTestCase {
     }
     func testLegacyControlsMigrateWithoutChangingKeys() throws {
         var c = BoardConfiguration(); c.layers.append(Layer.blank(id: 2, name: "Work"))
-        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(c)) as? [String: Any])
+        var json: [String: Any] = ["layers": try JSONSerialization.jsonObject(with: JSONEncoder().encode(c.layers))]
         json["schemaVersion"] = 5
         var layers = try XCTUnwrap(json["layers"] as? [[String: Any]])
         for i in layers.indices {
@@ -65,7 +66,7 @@ final class ControlMappingTests: XCTestCase {
         json["layers"] = layers
         let migrated = try JSONDecoder().decode(BoardConfiguration.self, from: JSONSerialization.data(withJSONObject: json))
         XCTAssertTrue(migrated.isValid)
-        XCTAssertEqual(migrated.schemaVersion, 6)
+        XCTAssertEqual(migrated.schemaVersion, 7)
         XCTAssertEqual(migrated.layers[0].bindings[13].kind, .native)
         XCTAssertEqual(migrated.layers[1].bindings[13].kind, .disabled)
         XCTAssertEqual(Array(migrated.layers[1].bindings.prefix(13)), Array(c.layers[1].bindings.prefix(13)))

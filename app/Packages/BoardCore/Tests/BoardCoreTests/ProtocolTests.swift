@@ -2,7 +2,15 @@ import XCTest
 import BoardCore
 
 final class ProtocolTests: XCTestCase {
-    struct InvalidCase: Decodable { let name: String; let config: BoardConfiguration }
+    struct InvalidCase: Decodable {
+        let name: String; let config: BoardConfiguration?
+        enum CodingKeys: String, CodingKey { case name, config }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            name = try c.decode(String.self, forKey: .name)
+            config = try? c.decode(BoardConfiguration.self, forKey: .config)
+        }
+    }
     struct Fixtures: Decodable { let validConfig: BoardConfiguration; let maximumConfig: BoardConfiguration; let invalidConfigs: [InvalidCase] }
     func fixtures() throws -> Fixtures {
         var root = URL(fileURLWithPath: #filePath)
@@ -17,7 +25,7 @@ final class ProtocolTests: XCTestCase {
         let f = try fixtures()
         XCTAssertTrue(f.validConfig.isValid)
         XCTAssertTrue(f.maximumConfig.isValid)
-        for invalid in f.invalidConfigs { XCTAssertFalse(invalid.config.isValid, invalid.name) }
+        for invalid in f.invalidConfigs { XCTAssertFalse(invalid.config?.isValid ?? false, invalid.name) }
     }
     func testLiveInheritanceDoesNotSwitchLayerOrCopyColors() throws {
         var config = try fixtures().validConfig
@@ -78,7 +86,7 @@ final class ProtocolTests: XCTestCase {
         XCTAssertLessThan(encoded.count + 256, 12288)
         XCTAssertEqual(try JSONDecoder().decode(BoardConfiguration.self, from: encoded), config)
         let data = try Wire.request(id: 23, method: "config.set", params: SetParams(baseRevision: 17, config: config))
-        XCTAssertGreaterThan(data.count, 4096)
+        XCTAssertLessThan(data.count, 4096)
         XCTAssertLessThan(data.count, 32769)
         var framer = LineFramer(); var lines = [String]()
         for start in stride(from: 0, to: data.count, by: 7) { lines += framer.feed(data.subdata(in: start..<min(start + 7, data.count))) }
