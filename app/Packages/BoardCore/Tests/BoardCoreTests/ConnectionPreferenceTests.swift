@@ -40,4 +40,28 @@ final class ConnectionPreferenceTests: XCTestCase {
         XCTAssertNil(ConnectionPreference.retryDelay(attempt: -1, knownBluetoothAvailable: true))
     }
 
+    func testRetryPrefersRememberedUSBAfterBluetooth() {
+        let value = ConnectionPreference(serial: "CM3-test", automatic: true, bluetooth: true)
+        XCTAssertEqual(value.retryRoute(usbSerials: ["other", "CM3-test"], preferBluetooth: true), .usb(1))
+        XCTAssertEqual(value.retryRoute(usbSerials: [], preferBluetooth: true), .bluetooth)
+    }
+    func testIncompleteUSBIdentityWaitsWithoutFallingBackToBluetooth() {
+        let value = ConnectionPreference(serial: "CM3-test", automatic: true, bluetooth: true)
+        XCTAssertEqual(value.retryRoute(usbSerials: [nil], preferBluetooth: true), .waitingForUSB)
+        XCTAssertEqual(value.retryRoute(usbSerials: ["CM3-test"], preferBluetooth: true), .usb(0))
+        XCTAssertEqual(ConnectionPreference.retryDelay(attempt: 7), 60)
+    }
+    func testRetryNeverAutomaticallyChoosesAnotherKeyboard() {
+        let value = ConnectionPreference(serial: "CM3-test", automatic: true)
+        XCTAssertEqual(value.retryRoute(usbSerials: ["other"], preferBluetooth: true), .waitingForUSB)
+        XCTAssertEqual(value.retryRoute(usbSerials: ["CM3-test", "CM3-test"], preferBluetooth: true), .ambiguousUSB)
+        XCTAssertEqual(value.retryRoute(usbSerials: [], preferBluetooth: false), .unavailable)
+    }
+    func testManualRetryStillFindsKnownUSBWhenAutomaticConnectionIsOff() {
+        let value = ConnectionPreference(serial: "CM3-test", automatic: false)
+        XCTAssertEqual(value.retryRoute(usbSerials: ["CM3-test"], preferBluetooth: true), .usb(0))
+        XCTAssertEqual(ConnectionPreference().retryRoute(usbSerials: ["example"], preferBluetooth: true), .usb(0))
+        XCTAssertEqual(ConnectionPreference().retryRoute(usbSerials: ["a", "b"], preferBluetooth: true), .waitingForUSB)
+    }
+
 }

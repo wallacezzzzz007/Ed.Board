@@ -2,7 +2,7 @@
 
 [README](../README.md) · [Third-party notices](THIRD_PARTY_NOTICES.md) · [License](../LICENSE)
 
-Ed.Board contains a native SwiftUI/AppKit App, a local Swift package and ESP-IDF firmware. Source versions: **App 0.6.0 (32)** and **firmware 0.6.0** (not yet released). Run the commands below from the repository root.
+Ed.Board contains a native SwiftUI/AppKit App, a local Swift package and ESP-IDF firmware. Source versions: **App 0.6.0 (33)** and **firmware 0.6.0** (not yet released). Run the commands below from the repository root.
 
 ## Changes since 0.5.3
 

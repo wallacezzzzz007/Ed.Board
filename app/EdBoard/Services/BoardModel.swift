@@ -276,8 +276,25 @@ final class BoardModel: ObservableObject {
     }
     func connect(automatically: Bool = false, wireless: Bool = false) {
         guard (!firmware.active || firmware.stage == "checking"), (wireless || !selectedPort.isEmpty), !busy, !connected else { return }
-        if wireless, ports.contains(where: { $0.vendor == 0x303a && $0.product == 0x8360 }) {
-            errorText = "USB is connected. Use USB or unplug it before connecting Bluetooth."; return
+        if wireless {
+            refreshPorts()
+            if !runtimeUSBPorts.isEmpty {
+                if automatically {
+                    // USB identity properties may arrive after the port notification.
+                    // Keep the existing backoff alive instead of stopping at the BLE gate.
+                    switch connectionPreference.retryRoute(usbSerials: runtimeUSBPorts.map(\.serial), preferBluetooth: true) {
+                    case .usb(let index):
+                        selectedPort = runtimeUSBPorts[index].path
+                        connect(automatically: true)
+                    default:
+                        errorText = "USB keyboard detected. Waiting to identify the remembered keyboard."
+                        scheduleReconnect()
+                    }
+                } else {
+                    errorText = "USB keyboard detected. Expand USB Port and choose Connect USB, or unplug USB before connecting Bluetooth."
+                }
+                return
+            }
         }
         reconnectWork?.cancel(); reconnectWork = nil
         usingBluetooth = wireless
@@ -849,6 +866,9 @@ extension BoardModel {
             try JSONEncoder().encode(connectionPreference).write(to: url, options: .atomic)
         } catch { errorText = "Cannot save connection preferences. This connection remains available." }
     }
+    private var runtimeUSBPorts: [SerialPort] {
+        ports.filter { $0.vendor == 0x303a && $0.product == 0x8360 }
+    }
     private func portsChanged() {
         refreshPorts()
         guard !firmware.blocksEditor else { return }
@@ -856,18 +876,23 @@ extension BoardModel {
         if (connected || busy) && ((!usingBluetooth && !ports.contains(where: { $0.path == openPort })) || (usingBluetooth && hasRememberedUSB)) {
             disconnect(manual: false)
         }
+        // A newly identified USB device should not wait behind a BLE backoff.
+        if hasRememberedUSB { reconnectWork?.cancel(); reconnectWork = nil }
         reconnectAttempt = 0
         scheduleReconnect()
     }
     private func scheduleReconnect() {
         guard !firmware.blocksEditor, !sleeping, !connected, !busy, connectionPreference.automatic, reconnectWork == nil else { return }
-        let candidates = ports.filter { connectionPreference.matches(serial: $0.serial, vendor: $0.vendor, product: $0.product) }
-        guard candidates.count == 1 || (candidates.isEmpty && connectionPreference.bluetooth == true) else {
-            status = candidates.isEmpty ? "Waiting for the remembered keyboard" : "Multiple matching ports found. Select one manually."
-            return
+        let route = connectionPreference.retryRoute(usbSerials: runtimeUSBPorts.map(\.serial),
+            preferBluetooth: connectionPreference.bluetooth == true)
+        switch route {
+        case .ambiguousUSB:
+            status = "Multiple matching ports found. Select one manually."; return
+        case .unavailable:
+            status = "Waiting for the remembered keyboard"; return
+        default: break
         }
-        let knownBluetoothAvailable = reconnectAttempt >= 6 && candidates.isEmpty &&
-            connectionPreference.bluetooth == true && bluetooth.canRetrieveVerifiedDevice
+        let knownBluetoothAvailable = reconnectAttempt >= 6 && route == .bluetooth && bluetooth.canRetrieveVerifiedDevice
         guard let delay = ConnectionPreference.retryDelay(attempt: reconnectAttempt,
             knownBluetoothAvailable: knownBluetoothAvailable) else { return }
         status = reconnectAttempt >= 6 ? "Waiting for the keyboard to wake…" : "Waiting to reconnect…"
@@ -879,13 +904,23 @@ extension BoardModel {
                 guard let self else { return }; self.reconnectWork = nil
                 guard !self.firmware.blocksEditor, !self.sleeping, !self.connected, !self.busy, self.connectionPreference.automatic else { return }
                 self.refreshPorts()
-                let matches = self.ports.filter { self.connectionPreference.matches(serial: $0.serial, vendor: $0.vendor, product: $0.product) }
-                guard matches.count <= 1 else { return }
                 self.reconnectAttempt = min(self.reconnectAttempt + 1, 7)
-                if let port = matches.first {
-                    self.selectedPort = port.path; self.connect(automatically: true)
-                } else if self.connectionPreference.bluetooth == true {
+                let usb = self.runtimeUSBPorts
+                switch self.connectionPreference.retryRoute(usbSerials: usb.map(\.serial),
+                    preferBluetooth: self.connectionPreference.bluetooth == true) {
+                case .usb(let index):
+                    AppLog.shared.event("reconnect route=usb")
+                    self.selectedPort = usb[index].path; self.connect(automatically: true)
+                case .bluetooth:
                     self.connect(automatically: true, wireless: true)
+                case .waitingForUSB:
+                    AppLog.shared.event("reconnect route=usb_identity_pending")
+                    self.errorText = "USB keyboard detected. Waiting to identify the remembered keyboard."
+                    self.scheduleReconnect()
+                case .ambiguousUSB:
+                    self.status = "Multiple matching ports found. Select one manually."
+                case .unavailable:
+                    self.scheduleReconnect()
                 }
             }
         }
@@ -1098,7 +1133,19 @@ extension BoardModel {
         if connected && !busy && !dirty { refresh(); return }
         let wireless = usingBluetooth
         disconnect(manual: false); refreshPorts()
-        connect(wireless: wireless || selectedPort.isEmpty)
+        let usb = runtimeUSBPorts
+        switch connectionPreference.retryRoute(usbSerials: usb.map(\.serial), preferBluetooth: wireless || selectedPort.isEmpty) {
+        case .usb(let index):
+            AppLog.shared.event("connection retry route=usb")
+            selectedPort = usb[index].path; connect()
+        case .bluetooth:
+            connect(wireless: true)
+        case .waitingForUSB, .ambiguousUSB:
+            errorText = "USB keyboard detected. Expand USB Port, select your keyboard and choose Connect USB."
+            scheduleReconnect()
+        case .unavailable:
+            connect()
+        }
     }
     func beginInitialDiscovery() {
         guard !firmware.blocksEditor, !connected, !busy, connectionPreference.serial.isEmpty else { return }

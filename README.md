@@ -68,7 +68,7 @@ Link a layer to an application to switch automatically while that app is active.
 
 ## Firmware
 
-This source tree targets **App 0.6.0 (32) / firmware 0.6.0**, not yet released. Downloaded releases may differ; use the App and firmware supplied together. Expanded layers require the matching new firmware.
+This source tree targets **App 0.6.0 (33) / firmware 0.6.0**, not yet released. Downloaded releases may differ; use the App and firmware supplied together. Expanded layers require the matching new firmware.
 
 Inspired by [AI Micro](https://micro.diyshare.cn/); portions of the firmware are adapted from its code, with the original [MIT license and copyright notice](firmware/usb-probe/src/vendor/LICENSE) retained.
 

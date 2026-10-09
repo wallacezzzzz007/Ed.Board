@@ -9,6 +9,21 @@ public struct ConnectionPreference: Codable, Equatable {
     public func matches(serial: String?, vendor: Int?, product: Int?) -> Bool {
         automatic && !self.serial.isEmpty && serial == self.serial && vendor == 0x303a && product == 0x8360
     }
+    public enum RetryRoute: Equatable {
+        case usb(Int), bluetooth, waitingForUSB, ambiguousUSB, unavailable
+    }
+    // Only runtime USB keyboard ports belong in this list. The returned index
+    // selects the remembered identity, never an arbitrary neighbouring device.
+    public func retryRoute(usbSerials: [String?], preferBluetooth: Bool) -> RetryRoute {
+        let matches = usbSerials.indices.filter { !serial.isEmpty && usbSerials[$0] == serial }
+        if matches.count == 1 { return .usb(matches[0]) }
+        if matches.count > 1 { return .ambiguousUSB }
+        if !usbSerials.isEmpty {
+            if serial.isEmpty && usbSerials.count == 1 { return .usb(0) }
+            return .waitingForUSB
+        }
+        return preferBluetooth ? .bluetooth : .unavailable
+    }
     public static func retryDelay(attempt: Int, knownBluetoothAvailable: Bool = false) -> Double? {
         let delays: [Double] = [1, 2, 4, 8, 16, 30]
         guard attempt >= 0 else { return nil }
