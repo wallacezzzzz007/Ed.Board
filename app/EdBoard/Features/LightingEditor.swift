@@ -26,7 +26,7 @@ struct KeyLightingPanel: View {
     @ObservedObject var model: BoardModel
     private var inherited: Bool { model.binding.kind == .inherit }
     private var native: Bool { model.selectedControl < 6 && model.draft.resolved(layer: model.selectedLayer, control: model.selectedControl)?.kind == .native }
-    private var custom: SwiftUI.Binding<Bool> { SwiftUI.Binding(get: { model.layer.keyLights[model.selectedControl] != nil }, set: { model.layer.keyLights[model.selectedControl] = $0 ? model.layer.keysLight : nil }) }
+    private var custom: SwiftUI.Binding<Bool> { SwiftUI.Binding(get: { model.layer.keyLights[model.selectedControl] != nil }, set: { model.layer.setCustomLight($0, control: model.selectedControl) }) }
     private var light: SwiftUI.Binding<LightSpec> { SwiftUI.Binding(get: { model.layer.keyLights[model.selectedControl] ?? model.layer.keysLight }, set: { model.layer.keyLights[model.selectedControl] = $0 }) }
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {

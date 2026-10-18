@@ -55,6 +55,6 @@ int main() {
             text=(ROOT/'firmware/usb-probe/src'/path).read_text()
             start=text.index('0x05,0x0C')
             report=text[start:text.index('};',start)]
-            self.assertEqual([int(v,16) for v in re.findall(r'0x[0-9a-fA-F]+',report)],expected)
+            self.assertEqual([int(v,16) for v in re.findall(r'0x[0-9a-fA-F]+',report)][:len(expected)],expected)
 
 if __name__=='__main__': unittest.main()

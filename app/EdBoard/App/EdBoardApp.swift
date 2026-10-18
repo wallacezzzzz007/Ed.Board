@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import CoreServices
+import Combine
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
@@ -8,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var quitTimer: Timer?
     private var statusItem: NSStatusItem?
     private var menuTimer: Timer?
+    private var batteryObserver: AnyCancellable?
     private var mainWindow: NSWindow?
     var openMainWindow: (() -> Void)?
     private var closeObserver: NSObjectProtocol?
@@ -46,6 +48,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // Menu actions must be wired before the first window onAppear.
     func configure(model: BoardModel, openWindow: @escaping () -> Void) {
         self.model = model
+        if batteryObserver == nil {
+            batteryObserver = model.$batteryWarningLevel
+                .combineLatest(model.$usingBluetooth, model.$connected)
+                .map { level, wireless, connected in connected && wireless ? level : 0 }
+                .removeDuplicates()
+                .sink { [weak self] level in
+                    Task { @MainActor in self?.updateBatteryIndicator(level) }
+                }
+        }
         openMainWindow = openWindow
     }
 
@@ -108,8 +119,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationWillTerminate(_ notification: Notification) { model?.shutdown() }
 
     private func installStatusMenu() {
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        // 18 pt artwork with 2 pt of horizontal padding on each side.
+        let item = NSStatusBar.system.statusItem(withLength: 22)
         statusItem = item
+        item.button?.imagePosition = .imageOnly
         item.button?.image = Self.microIcon
         item.button?.setAccessibilityLabel("Ed.Board")
         let menu = NSMenu()
@@ -128,6 +141,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         quit.target = self
         menu.addItem(quit)
         item.menu = menu
+        updateBatteryIndicator(model?.connected == true && model?.usingBluetooth == true ? (model?.batteryWarningLevel ?? 0) : 0)
+    }
+    private func updateBatteryIndicator(_ level: Int) {
+        statusItem?.button?.image = level == 2 ? Self.criticalBatteryIcon : level == 1 ? Self.lowBatteryIcon : Self.microIcon
+        statusItem?.button?.setAccessibilityLabel(level > 0 ? "Ed.Board · Low keyboard battery" : "Ed.Board")
+        statusItem?.button?.toolTip = level == 2 ? "Ed.Board · Battery very low — charge now" : level == 1 ? "Ed.Board · Low battery — charge soon" : "Ed.Board"
     }
     func menuWillOpen(_ menu: NSMenu) {
         model?.menuStatusVisible = true
@@ -152,8 +171,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.items[0].title = model.connected ? "Connected · \(model.usingBluetooth ? "Bluetooth" : "USB")" : "Disconnected"
         menu.items[0].isEnabled = false
         menu.items[1].title = "Battery · " + (model.batteryKnown ? model.batteryLabel : "Unknown")
-            + (model.batteryCharging ? " · Charging" : model.batteryFull ? " · Fully charged" : "")
+            + (model.batteryCharging ? " · Charging" : model.batteryFull ? " · Fully charged" : model.batteryWarningLevel > 0 ? " · Charge soon" : "")
         menu.items[1].isEnabled = false
+    }
+    private static let lowBatteryIcon = batteryIcon(color: .systemOrange)
+    private static let criticalBatteryIcon = batteryIcon(color: .systemRed)
+    private static func batteryIcon(color: NSColor) -> NSImage {
+        let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
+            // Preserve the normal keyboard frame; only the vertical battery is colored.
+            NSColor.labelColor.setStroke()
+            let outline = NSBezierPath(roundedRect: NSRect(x: 1, y: 1, width: 16, height: 16), xRadius: 3, yRadius: 3)
+            outline.lineWidth = 1.2; outline.stroke()
+            color.setStroke(); color.setFill()
+            let battery = NSBezierPath(roundedRect: NSRect(x: 6.15, y: 4.5, width: 5.7, height: 8), xRadius: 1, yRadius: 1)
+            battery.lineWidth = 1.05; battery.stroke()
+            NSBezierPath(roundedRect: NSRect(x: 7.65, y: 12.8, width: 2.7, height: 1), xRadius: 0.35, yRadius: 0.35).fill()
+            NSBezierPath(roundedRect: NSRect(x: 7.5, y: 5.85, width: 3, height: 1.65), xRadius: 0.35, yRadius: 0.35).fill()
+            return true
+        }
+        image.isTemplate = false // Keep battery colors instead of tinting the entire frame.
+        image.cacheMode = .never // Resolve the frame's label color in the menu bar's drawing appearance.
+        return image
     }
     private static let microIcon: NSImage = {
         let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in

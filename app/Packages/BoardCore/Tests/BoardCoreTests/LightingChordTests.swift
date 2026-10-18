@@ -104,4 +104,25 @@ final class LightingChordTests: XCTestCase {
             XCTAssertTrue(HIDKey.choices.contains { $0.id == id }, "Missing \(id)")
         }
     }
+    func testNewCustomLightIsSolidWithoutChangingLayerSettings() {
+        var layer = Layer.blank(id: 2, name: "Example")
+        layer.keysLight = LightSpec(effect: 0, color: 0x123456, brightness: 25, active: 80)
+        let original = layer.keysLight
+        layer.setCustomLight(true, control: 0)
+        XCTAssertEqual(layer.keyLights[0], LightSpec(effect: 1, color: 0x123456, brightness: 25, active: 80))
+        XCTAssertEqual(layer.keysLight, original)
+        XCTAssertNil(layer.keyLights[1])
+    }
+    func testExistingCustomOffIsPreservedUntilExplicitlyRemoved() {
+        var layer = Layer.blank(id: 2, name: "Example")
+        let saved = LightSpec(effect: 0, color: 0x123456, brightness: 20)
+        layer.keyLights[0] = saved
+        layer.setCustomLight(true, control: 0)
+        XCTAssertEqual(layer.keyLights[0], saved)
+        layer.setCustomLight(false, control: 0)
+        XCTAssertNil(layer.keyLights[0])
+        layer.setCustomLight(true, control: 0)
+        XCTAssertEqual(layer.keyLights[0]?.effect, 1)
+    }
+
 }

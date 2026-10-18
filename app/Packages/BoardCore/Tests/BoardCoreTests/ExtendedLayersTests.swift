@@ -102,4 +102,35 @@ final class ExtendedLayersTests: XCTestCase {
         XCTAssertEqual(auto.matchingLayer(serial: "synthetic", bundleID: "example.app16", available: Set(1...16)), 16)
         auto.devices["synthetic"]!.append(AutoRule(layer: 17)); XCTAssertFalse(auto.isValid)
     }
+    func testInheritanceDefaultUsesFavoriteOrderRatherThanLayerOrder() {
+        var c = BoardConfiguration()
+        for id in 2...4 { c.layers.append(Layer.blank(id: id, name: "Layer \(id)")) }
+        c.favorites = [3, 2, 1]
+        XCTAssertEqual(c.defaultInheritanceSource(layer: 4, control: 0), 3)
+        c.favorites = [2, 3, 1]
+        XCTAssertEqual(c.defaultInheritanceSource(layer: 4, control: 0), 2)
+        XCTAssertEqual(c.defaultInheritanceSource(layer: 2, control: 0), 3)
+    }
+    func testInheritanceDefaultSkipsCyclesAndFallsBackToExtended() {
+        var c = BoardConfiguration()
+        for id in 2...4 { c.layers.append(Layer.blank(id: id, name: "Layer \(id)")) }
+        c.favorites = [2, 3]
+        c.layers[2].bindings[0] = Binding(kind: .inherit, source: 2)
+        XCTAssertEqual(c.defaultInheritanceSource(layer: 2, control: 0), 1)
+        c.layers[0].bindings[0] = Binding(kind: .inherit, source: 4)
+        c.layers[3].bindings[0] = Binding(kind: .inherit, source: 1)
+        XCTAssertNil(c.defaultInheritanceSource(layer: 2, control: 0))
+    }
+    func testInheritanceDefaultPreservesCodexComponentRestrictions() {
+        var c = BoardConfiguration()
+        c.layers.append(Layer.blank(id: 2, name: "First"))
+        c.layers.append(Layer.blank(id: 3, name: "Extended"))
+        c.favorites = [1, 2]
+        XCTAssertEqual(c.defaultInheritanceSource(layer: 2, control: 0), 1)
+        XCTAssertEqual(c.defaultInheritanceSource(layer: 2, control: 13), 3)
+        XCTAssertNil(c.defaultInheritanceSource(layer: 1, control: 13))
+        c.layers.removeLast()
+        XCTAssertNil(c.defaultInheritanceSource(layer: 2, control: 13))
+    }
+
 }

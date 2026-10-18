@@ -1,4 +1,5 @@
 #include <array>
+#include "app_switcher.hpp"
 // Ed.Board USB Codex integration. Vendor protocol/animation attribution: vendor/LICENSE.
 #include <algorithm>
 #include <atomic>
@@ -45,7 +46,14 @@ const uint8_t kReportDescriptor[] = {
     0x05,0x0C,0x09,0x01,0xA1,0x01,0x85,0x02,
     0x15,0x00,0x25,0x01,0x75,0x01,0x95,0x06,
     0x09,0xE9,0x09,0xEA,0x09,0xE2,0x09,0xCD,0x09,0xB6,0x09,0xB5,0x81,0x02,
-    0x75,0x02,0x95,0x01,0x81,0x01,0xC0
+    0x75,0x02,0x95,0x01,0x81,0x01,0xC0,
+    // Mouse report 3: buttons, X, Y, signed relative vertical Wheel.
+    0x05,0x01,0x09,0x02,0xA1,0x01,0x85,0x03,
+    0x09,0x01,0xA1,0x00,0x05,0x09,0x19,0x01,0x29,0x03,
+    0x15,0x00,0x25,0x01,0x95,0x03,0x75,0x01,0x81,0x02,
+    0x95,0x01,0x75,0x05,0x81,0x01,
+    0x05,0x01,0x09,0x30,0x09,0x31,0x09,0x38,
+    0x15,0x81,0x25,0x7F,0x75,0x08,0x95,0x03,0x81,0x06,0xC0,0xC0
 };
 const tusb_desc_device_t kDevice = {
     .bLength = sizeof(tusb_desc_device_t), .bDescriptorType = TUSB_DESC_DEVICE,
@@ -210,12 +218,14 @@ std::string encoderStep(bool clockwise) {
 }
 std::array<board::Binding,board::control_count> heldShortcuts{};
 std::array<bool,board::control_count> shortcutDown{};
+board::AppSwitcher appSwitcher;
 int previousDirection=0;
 int quickCandidate=0;
+board::WheelRepeat joystickWheel;
 bool quickCompleted=false;
 bool quickCancelled=false, knobPending=false, knobHeld=false;
 int64_t knobStarted=0;
-void resetCustomGestures() { quickCandidate=0; quickCancelled=false; knobPending=false; knobHeld=false; set_preview_cancelled(false); }
+void resetCustomGestures() { appSwitcher.reset(); joystickWheel.reset(); quickCandidate=0; quickCancelled=false; knobPending=false; knobHeld=false; set_preview_cancelled(false); }
 
 bool sendKeyboard(uint32_t session) {
     uint8_t codes[6]{},mods=0;unsigned count=0;bool seen[256]{};
@@ -224,6 +234,8 @@ bool sendKeyboard(uint32_t session) {
         auto add=[&](unsigned key){if(key>=224&&key<=231){mods|=1U<<(key-224);return;}if(key&&!seen[key]){seen[key]=true;if(count<6)codes[count]=key;++count;}};
         if(b.key_count)for(unsigned k=0;k<b.key_count;++k)add(b.keys[k]);else add(b.usage);
     }
+    mods |= appSwitcher.modifiers();
+    if(appSwitcher.tab()&&!seen[43]) { if(count<6)codes[count]=43; ++count; }
     if(count>6)for(auto &code:codes)code=1; // HID ErrorRollOver, released keys remain tracked.
     const int64_t deadline=esp_timer_get_time()+500000;
     if(activeLink.load()==2) {
@@ -258,7 +270,27 @@ bool sendMedia(uint8_t bits,uint32_t session) {
     }
     ++txFailures;armed=false;needsSync=true;return false;
 }
+bool sendWheel(const std::array<uint8_t,4>& report,uint32_t session,int heldDirection=0) {
+    const int64_t deadline=esp_timer_get_time()+500000;
+    while(inputLinkReady()&&epoch.load()==session&&esp_timer_get_time()<deadline) {
+        if (heldDirection) {
+            const auto physical = input_snapshot();
+            // Do not deliver a delayed repeat after the user lets go or turns.
+            if (!armed || needsSync || !physical.ready || physical.fault || physical.quick_direction!=heldDirection) return true;
+        }
+        const bool ok=activeLink.load()==2 ? aim::ble_report(3,report.data(),report.size()) :
+            (tud_hid_n_ready(0)&&tud_hid_n_report(0,3,report.data(),report.size()));
+        if(ok)return true;
+        vTaskDelay(1);
+    }
+    ++txFailures;armed=false;needsSync=true;return false;
+}
 bool customInput(unsigned control,board::Binding binding,bool down,uint32_t session) {
+    if(binding.kind==board::Kind::AppSwitcher)return true;
+    if(binding.kind==board::Kind::Mouse) {
+        if(!inputLinkReady())return true;
+        return board::trigger_wheel(binding.usage,down,[&](const auto& report){return sendWheel(report,session);});
+    }
     if(binding.kind==board::Kind::Media) {
         if(!down||!inputLinkReady())return true;
         return mediaPulse.trigger(binding.usage,down,[&](uint8_t bits){return sendMedia(bits,session);});
@@ -350,18 +382,38 @@ void processInputs(uint32_t session) {
                 if (!linkReady) { resetCustomGestures(); break; }
                 if (event.down) { knobPending=true; knobHeld=false; knobStarted=esp_timer_get_time(); }
                 else if (knobPending) {
-                    if (!knobHeld) { ok=pulseControl(esp_timer_get_time()-knobStarted>=600000 ? 20 : 13,session); }
+                    if (appSwitcher.active()) { ok=appSwitcher.finish([&]{return sendKeyboard(session);}); }
+                    else if (!knobHeld) {
+                        const bool held=esp_timer_get_time()-knobStarted>=600000;
+                        if(held&&bindingFor(20).kind==board::Kind::AppSwitcher) {
+                            ok=appSwitcher.begin([&]{return sendKeyboard(session);});
+                            if(ok)ok=appSwitcher.finish([&]{return sendKeyboard(session);});
+                        } else { ok=pulseControl(held ? 20 : 13,session); }
+                    }
                     knobPending=false;
                 }
                 break;
             }
             auto binding=bindingFor(event.value);
-            if(binding.kind!=board::Kind::Native){dispatched=binding.kind==board::Kind::Shortcut||binding.kind==board::Kind::Media;ok=customInput(event.value,binding,event.down,session);}
+            if(binding.kind!=board::Kind::Native){dispatched=binding.kind==board::Kind::Shortcut||binding.kind==board::Kind::Media||binding.kind==board::Kind::Mouse;ok=customInput(event.value,binding,event.down,session);}
             else if(linkReady)ok=sendInput(aim::Protocol::key(keyNames[event.value],event.down,event.value<6?event.value:-1),session);
             break;
         }
         case InputKind::Encoder: {
             if(std::abs(event.value)>32){needsSync=true;armed=false;ok=false;break;}
+            // A detent arriving at the threshold belongs to the hold gesture,
+            // even if this loop has not yet run the long-press timer below.
+            if(knobPending&&!knobHeld&&esp_timer_get_time()-knobStarted>=600000&&bindingFor(20).kind==board::Kind::AppSwitcher) {
+                knobHeld=true;ok=appSwitcher.begin([&]{return sendKeyboard(session);});
+            }
+            if(appSwitcher.active()) {
+                for(int i=0;i<std::abs(event.value)&&ok;++i) {
+                    if(!(input_snapshot().keys&(1U<<13)))break;
+                    ok=appSwitcher.step(event.value>0,[&]{return sendKeyboard(session);});
+                }
+                break;
+            }
+            if(!ok)break;
             unsigned control=event.value<0?14:15;auto binding=bindingFor(control);
             dispatched=binding.kind!=board::Kind::Disabled;
             for(int i=0;i<std::abs(event.value)&&ok;++i) {
@@ -382,7 +434,8 @@ void processInputs(uint32_t session) {
                 set_preview_cancelled(quickCancelled);
                 dispatched=false;
             } else {
-                if (!quickCancelled && quickCandidate) { ok=pulseControl(quickCandidate,session); }
+                if (!quickCancelled && quickCandidate && bindingFor(quickCandidate).kind != board::Kind::Mouse) { ok=pulseControl(quickCandidate,session); }
+                joystickWheel.reset();
                 quickCompleted=true;
                 quickCandidate=0;quickCancelled=false;set_preview_cancelled(false);
             }
@@ -431,10 +484,31 @@ void processInputs(uint32_t session) {
                 ok&&dispatched&&event.kind!=InputKind::Touch&&event.kind!=InputKind::Ready);
         if(!ok)break;
     }
+    // Check fresh physical state as well as the consumed direction event. This
+    // prevents stale queued gestures from scrolling after centre/cancel/fault.
+    const auto current = input_snapshot();
+    // Release even if a burst of encoder events delayed the queued key-up.
+    if(appSwitcher.active()&&!(current.keys&(1U<<13))) {
+        if(!appSwitcher.finish([&]{return sendKeyboard(session);})){needsSync=true;armed=false;}
+        knobPending=false;
+    }
+    constexpr unsigned wheelControls[] = {0,16,21,17,22,18,23,19,24};
+    const bool wheelReady = armed && !needsSync && inputLinkReady() && epoch.load()==session &&
+        current.ready && !current.fault && input_drops()==dropsBefore &&
+        management.store.current().active().id!=1 && current.quick_direction>0 && current.quick_direction<=8 &&
+        quickCandidate==int(wheelControls[current.quick_direction]) && !quickCancelled;
+    const auto wheelBinding = wheelReady ? bindingFor(quickCandidate) : board::Binding{};
+    const auto wheelNow = esp_timer_get_time();
+    joystickWheel.select(wheelReady && wheelBinding.kind==board::Kind::Mouse ? wheelBinding.usage : 0, wheelNow);
+    if (!joystickWheel.tick(wheelNow,[&](const auto& report){return sendWheel(report,session,current.quick_direction);})) {
+        needsSync=true;armed=false;
+    }
     if (armed && !needsSync && inputLinkReady() && epoch.load()==session && knobPending && !knobHeld &&
         (input_snapshot().keys & (1U<<13)) && esp_timer_get_time()-knobStarted>=600000) {
         knobHeld=true;
-        if (!pulseControl(20,session)) { needsSync=true;armed=false; }
+        const bool ok = bindingFor(20).kind==board::Kind::AppSwitcher ?
+            appSwitcher.begin([&]{return sendKeyboard(session);}) : pulseControl(20,session);
+        if (!ok) { needsSync=true;armed=false; }
     }
 }
 
@@ -486,7 +560,10 @@ struct Assembly {
 extern "C" const uint8_t *tud_hid_descriptor_report_cb(uint8_t instance) {
     return instance == 0 ? kReportDescriptor : nullptr;
 }
-extern "C" uint16_t tud_hid_get_report_cb(uint8_t, uint8_t, hid_report_type_t, uint8_t *, uint16_t) {
+extern "C" uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t id, hid_report_type_t type, uint8_t *buffer, uint16_t length) {
+    if(instance==0&&id==3&&type==HID_REPORT_TYPE_INPUT&&length>=4) {
+        memset(buffer,0,4);return 4;
+    }
     return 0; // No feature report in the protocol; replies use interrupt IN.
 }
 extern "C" void tud_hid_set_report_cb(uint8_t instance, uint8_t id, hid_report_type_t type,
@@ -676,7 +753,10 @@ extern "C" void app_main() {
                 !finalState.ready||finalState.fault||finalState.keys||finalState.direction||finalState.quick_direction||finalState.touched,aim::ble_pairing());
             if(!management.power.deepDue()||usbDataReady()||finalState.charging||finalState.full||!finalState.ready||finalState.fault
                ||finalState.keys||finalState.direction||finalState.quick_direction||finalState.touched||!gpio_get_level(GPIO_NUM_11)) {
-                management.power.activity(esp_timer_get_time());
+                // A cable arriving during the final check only cancels deep sleep.
+                if(!finalState.ready||finalState.fault||finalState.keys||finalState.direction
+                   ||finalState.quick_direction||finalState.touched||!gpio_get_level(GPIO_NUM_11))
+                    management.power.activity(esp_timer_get_time());
             } else {
                 armed=false;needsSync=true;clear_inputs();
                 if(inputLinkReady())releaseAll(epoch.load());

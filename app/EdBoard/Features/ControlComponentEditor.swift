@@ -7,6 +7,8 @@ struct ControlComponentEditor: View {
     let selected: Int?
     let select: (Int) -> Void
     let back: () -> Void
+    @State private var overlayHovering = false
+    @State private var overlayHelpVisible = false
     @State private var holdFeedback = false
     @State private var holdWork: DispatchWorkItem?
     private let knobTitles = ["Turn left", "Turn right", "Click", "Press and hold"]
@@ -19,17 +21,54 @@ struct ControlComponentEditor: View {
     }
     var body: some View {
         VStack(spacing: 14) {
-            HStack {
-                Text(knob ? "Knob" : "Quick Selection").font(.title3.weight(.semibold))
-                if knob {
-                    HelpNote(text: "Click runs on release. Hold for 0.6 seconds to run Press and hold once, without Click.")
-                } else if model.selectedLayer != 1 {
-                    FullWidthPopup(title: "Inherit all directions", selection: SwiftUI.Binding(
-                        get: { String(model.quickSelectionSource) },
-                        set: { if let source = Int($0) { ShortcutRecorder.cancelAll(); model.setQuickSelectionSource(source) } }),
-                        options: [PopupOption(id: "0", title: "Off")] + model.quickSelectionSources.map {
-                            PopupOption(id: String($0.id), title: "Inherit: \($0.name)")
-                        }).frame(width: 170, height: 30)
+            VStack(spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(knob ? "Knob" : "Quick Selection").font(.title3.weight(.semibold))
+                    if knob {
+                        HelpNote(text: "Click runs on release. Hold for 0.6 seconds to run Press and hold once, without Click.")
+                    } else if model.selectedLayer != 1 {
+                        FullWidthPopup(title: "Inherit all directions", selection: SwiftUI.Binding(
+                            get: { String(model.quickSelectionSource) },
+                            set: { if let source = Int($0) { ShortcutRecorder.cancelAll(); model.setQuickSelectionSource(source) } }),
+                            options: [PopupOption(id: "0", title: "Off")] + model.quickSelectionSources.map {
+                                PopupOption(id: String($0.id), title: "Inherit: \($0.name)")
+                            }, compactTitle: true).frame(width: 145, height: 30)
+                    }
+                    if !knob {
+                        Button { model.desktopOverlayEnabled.toggle() } label: {
+                            DesktopOverlayGlyph()
+                                .stroke(style: StrokeStyle(lineWidth: 1.15, lineCap: .round))
+                                .frame(width: 19, height: 19)
+                                .foregroundStyle(model.desktopOverlayEnabled ? Color.accentColor : Color.secondary)
+                                .frame(width: 30, height: 30)
+                                .background(model.desktopOverlayEnabled ? Color.accentColor.opacity(0.14) : Color.primary.opacity(0.06),
+                                            in: RoundedRectangle(cornerRadius: 6))
+                                .contentShape(RoundedRectangle(cornerRadius: 6))
+                        }
+                        .buttonStyle(.plain)
+                        .onHover { inside in
+                            overlayHovering = inside
+                            if !inside { overlayHelpVisible = false }
+                        }
+                        .task(id: overlayHovering) {
+                            guard overlayHovering else { return }
+                            do { try await Task.sleep(nanoseconds: 500_000_000) } catch { return }
+                            guard !Task.isCancelled, overlayHovering else { return }
+                            overlayHelpVisible = true
+                        }
+                        .accessibilityLabel("Show Desktop Overlay")
+                        .accessibilityValue(model.desktopOverlayEnabled ? "On" : "Off")
+                        .disabled(!model.canEditDesktopOverlay)
+                    }
+                }
+                if !knob {
+                    Text(overlayHelpVisible ? (model.desktopOverlayEnabled ? "Hide Desktop Overlay" : "Show Desktop Overlay") : "")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .frame(height: 14)
+                        .accessibilityHidden(true)
+                        .allowsHitTesting(false)
                 }
             }
             if knob {
@@ -80,7 +119,7 @@ struct ControlComponentEditor: View {
                     let work = DispatchWorkItem { holdFeedback = true }
                     holdWork = work; DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
                 }
-            }.onDisappear { holdWork?.cancel() }
+            }.onDisappear { holdWork?.cancel(); overlayHovering = false; overlayHelpVisible = false }
     }
     private func activeKnob(_ id: Int) -> Bool {
         if id == 15 { return model.previewTurnLeft }
@@ -103,6 +142,24 @@ struct RingSector: Shape {
         path.addArc(center: center, radius: outer, startAngle: .degrees(start), endAngle: .degrees(end), clockwise: false)
         path.addArc(center: center, radius: inner, startAngle: .degrees(end), endAngle: .degrees(start), clockwise: true)
         path.closeSubpath()
+        return path
+    }
+}
+
+/// Vector miniature of the eight-sector desktop wheel.
+private struct DesktopOverlayGlyph: Shape {
+    func path(in rect: CGRect) -> Path {
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let radius = min(rect.width, rect.height) * 0.45
+        let inner = radius * 0.32
+        var path = Path()
+        path.addEllipse(in: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2))
+        path.addEllipse(in: CGRect(x: center.x - inner, y: center.y - inner, width: inner * 2, height: inner * 2))
+        for index in 0..<8 {
+            let angle = (Double(index) + 0.5) * .pi / 4
+            path.move(to: CGPoint(x: center.x + cos(angle) * inner, y: center.y + sin(angle) * inner))
+            path.addLine(to: CGPoint(x: center.x + cos(angle) * radius, y: center.y + sin(angle) * radius))
+        }
         return path
     }
 }

@@ -146,7 +146,7 @@ static bool valid_config(const Configuration &c) {
         if(l.effects[2]==2||(l.effects[0]==4&&l.effects[1]<l.brightness)||(l.effects[2]==4&&l.effects[4]<(l.effects[3]<0?l.brightness:l.effects[3])))return false;
         for(auto v:l.key_lights)if(v.custom&&(v.effect>4||v.color>0xffffff||v.brightness>100||v.active>100||(v.effect==4&&v.active<v.brightness)))return false;
         for(unsigned i=0;i<control_count;++i){auto b=l.bindings[i];
-            if(unsigned(b.kind)>8||b.key_count>14)return false;
+            if(unsigned(b.kind)>10||b.key_count>14)return false;
             if(b.key_count){
                 if(b.kind!=Kind::Shortcut||b.usage||b.modifiers||b.source)return false;
                 bool seen[256]{};unsigned normal=0;
@@ -154,8 +154,10 @@ static bool valid_config(const Configuration &c) {
                 if(normal>6)return false;
             }else if(b.kind==Kind::Shortcut){if(b.usage<4||b.usage>115||b.modifiers>15||b.source)return false;}
             else if(b.kind==Kind::Media){if(!media_bit(b.usage)||b.modifiers||b.source)return false;}
+            else if(b.kind==Kind::Mouse){if(!wheel_delta(b.usage)||b.modifiers||b.source)return false;}
             else if(is_host(b.kind)){if(b.usage||b.modifiers||!b.source||b.source>0x7fffffff)return false;}
             else if(b.usage||b.modifiers||(b.kind==Kind::Inherit?(!b.source||b.source>255):bool(b.source)))return false;
+            if(b.kind==Kind::AppSwitcher&&i!=20)return false;
             if(b.kind==Kind::Cancel&&!(i>=16&&i!=20))return false;
             if(i>=13&&((l.id==1&&b.kind!=Kind::Native)||(l.id!=1&&(b.kind==Kind::Native||(b.kind==Kind::Inherit&&b.source==1)))))return false;
             bool seen[256]{};unsigned id=l.id;bool done=false;
@@ -176,7 +178,7 @@ static std::vector<uint8_t> pack8(const Configuration &c,bool snapshot=false) {
             if(b.kind==Kind::Shortcut){if(b.key_count){for(unsigned i=0;i<b.key_count;++i)put(b.keys[i]);}else{put(b.usage);put(b.modifiers);}}
             else if(b.kind==Kind::Inherit)put(b.source);
             else if(is_host(b.kind))put(b.source,4);
-            else if(b.kind==Kind::Media)put(b.usage);
+            else if(b.kind==Kind::Media||b.kind==Kind::Mouse)put(b.usage);
         }
         for(auto v:l.key_lights){put(v.custom?(128|v.effect):0);if(v.custom){put(v.color,3);put(v.brightness);put(v.active);}}
     }
@@ -194,7 +196,7 @@ static bool unpack8(const std::vector<char> &data,size_t size,Configuration &out
         l.color=get(3);l.ring_color=get(3);l.brightness=get();for(unsigned i=0;i<5;++i){auto e=get();l.effects[i]=(i==3&&e==255)?-1:int(e);}
         for(auto &b:l.bindings){auto header=get();b.kind=Kind(header&15);b.key_count=header>>4;if(b.key_count>14||(b.key_count&&b.kind!=Kind::Shortcut))return false;
             if(b.kind==Kind::Shortcut){if(b.key_count){for(unsigned i=0;i<b.key_count;++i)b.keys[i]=get();}else{b.usage=get();b.modifiers=get();}}
-            else if(b.kind==Kind::Inherit)b.source=get();else if(is_host(b.kind))b.source=get(4);else if(b.kind==Kind::Media)b.usage=get();
+            else if(b.kind==Kind::Inherit)b.source=get();else if(is_host(b.kind))b.source=get(4);else if(b.kind==Kind::Media||b.kind==Kind::Mouse)b.usage=get();
         }
         for(auto &v:l.key_lights){auto h=get();if(h!=0&&(h<128||h>132))return false;v.custom=h!=0;if(v.custom){v.effect=h&7;v.color=get(3);v.brightness=get();v.active=get();}}
         c.layers.push_back(l);

@@ -42,6 +42,12 @@ struct BoardView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if let warning = model.batteryWarning {
+                Label(warning, systemImage: "exclamationmark.triangle.fill")
+                    .font(.callout).foregroundStyle(model.batteryWarningLevel == 2 ? Color.red : Color.orange)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(12)
+                    .background((model.batteryWarningLevel == 2 ? Color.red : Color.orange).opacity(0.08))
+            }
             Group {
                 switch page {
                 case .keymap:
@@ -488,6 +494,7 @@ struct BoardView: View {
                             HStack(spacing: 10) {
                                 BatteryGauge(percent: model.batteryPercent, known: model.batteryKnown, charging: model.batteryCharging)
                                 Text(model.batteryLabel).font(.system(size: 15, weight: .semibold))
+                                    .help("Estimated from battery voltage. Remaining runtime varies with use.")
                             }.padding(.horizontal, 10).padding(.vertical, 7)
                         }.frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -522,7 +529,7 @@ struct BoardView: View {
                     }
                     if model.pairingNoticeVisible { Text(model.pairingMessage).font(.callout).foregroundStyle(model.pairingBusy ? Color.secondary : .orange) }
                 }
-                InfoSection("Power & Sleep", help: "Both timers start at the last physical input. Lights Off After: Off disables automatic dimming. Deep Sleep After: Off keeps Bluetooth connected. Press and release the knob to wake from deep sleep. USB data and charging suspend both timers.") {
+                InfoSection("Power & Sleep", help: "Lights Off After uses the same idle time on battery and external power. Physical input restores the lights. Off disables automatic lights off. Deep Sleep After: Off keeps Bluetooth connected. USB data, charging, and a full-charge indication prevent deep sleep; unplugging starts a fresh deep-sleep interval. Press and release the knob to wake from deep sleep.") {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), alignment: .leading)], alignment: .leading, spacing: 20) {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Lights Off After").font(.callout.weight(.medium))
@@ -665,6 +672,7 @@ private struct KeyInspector: View {
     var close: () -> Void
     @State private var iconPicker = false
     @State private var openAsFile = false
+    @State private var applicationButtonHeight: CGFloat = 28
 
     var body: some View {
         VStack(spacing: 0) {
@@ -687,7 +695,7 @@ private struct KeyInspector: View {
                         actionForm.frame(maxWidth: .infinity, alignment: .leading)
                     }
                     if model.selectedControl < 13 { Divider(); KeyLightingPanel(model: model) }
-                    if model.binding.kind == .shortcut || model.binding.kind == .media {
+                    if model.binding.kind == .shortcut || model.binding.kind == .media || model.binding.kind == .mouse {
                         Divider()
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Name & Icon").font(.headline)
@@ -695,20 +703,20 @@ private struct KeyInspector: View {
                         HStack {
                             Button { ShortcutRecorder.cancelAll(); iconPicker.toggle() } label: {
                                 Group {
-                                    if let data = model.currentPresentation.image, let image = NSImage(data: data) { Image(nsImage: image).resizable().scaledToFit() }
+                                    if let data = model.currentPresentation.image, let image = NSImage(data: data) { ActionIcon.importedImage(image, presentation: model.currentPresentation).resizable().scaledToFit() }
                                     else if ActionIconImage.assets[model.currentPresentation.symbol] != nil { ActionIconImage.image(model.currentPresentation.symbol).resizable().scaledToFit().frame(width: 24, height: 24) }
                                     else { Image(systemName: model.currentPresentation.symbol.isEmpty ? "plus" : model.currentPresentation.symbol).font(.title2) }
                                 }.frame(width: 44, height: 44)
                             }.accessibilityLabel("Choose icon").popover(isPresented: $iconPicker) {
                                 ShortcutIconPicker(selected: model.currentPresentation.symbol) { symbol in
                                     model.currentPresentation.symbol = symbol
-                                    model.currentPresentation.image = nil
+                                    model.currentPresentation.clearImage()
                                     iconPicker = false
                                 }
                             }
                             VStack(alignment: .leading) {
                                 Button("Choose image…") { model.chooseKeyImage() }
-                                Button("Remove icon") { model.currentPresentation.symbol = ""; model.currentPresentation.image = nil }
+                                Button("Remove icon") { model.currentPresentation.symbol = ""; model.currentPresentation.clearImage() }
                                     .disabled(model.currentPresentation.symbol.isEmpty && model.currentPresentation.image == nil)
                             }
                         }
@@ -723,9 +731,10 @@ private struct KeyInspector: View {
         .onChange(of: model.selectedLayer) { _ in openAsFile = model.hostValue.hasPrefix("/"); iconPicker = false }
     }
     private var actionOptions: [PopupOption] {
-        var options = [PopupOption(id: "shortcut", title: "Shortcut"), PopupOption(id: "media", title: "Media Control", enabled: model.info?.mediaVersion == 1), PopupOption(id: "inherit", title: "Inherit from layer"), PopupOption(id: "application", title: "Open application"), PopupOption(id: "url", title: "Open URL"), PopupOption(id: "file", title: "Open file or folder"), PopupOption(id: "text", title: "Insert text")]
+        var options = [PopupOption(id: "shortcut", title: "Shortcut"), PopupOption(id: "media", title: "Media Control", enabled: model.info?.mediaVersion == 1), PopupOption(id: "mouse", title: "Mouse Control", enabled: model.info?.mouseVersion == 1), PopupOption(id: "inherit", title: "Inherit from layer"), PopupOption(id: "application", title: "Open application"), PopupOption(id: "url", title: "Open URL"), PopupOption(id: "file", title: "Open file or folder"), PopupOption(id: "text", title: "Insert text")]
         if model.selectedLayer == 1 && model.selectedControl < 13 { options.append(PopupOption(id: "native", title: "Managed by Codex")) }
         else if model.binding.kind == .native && model.selectedControl < 13 { options.append(PopupOption(id: "native", title: "Codex · Existing", enabled: false)) }
+        if model.selectedControl == 20 && model.selectedLayer != 1 { options.append(PopupOption(id: "appSwitcher", title: "App Switcher", enabled: model.info?.appSwitcherVersion == 1)) }
         if Control.isStick(model.selectedControl) { options.append(PopupOption(id: "cancel", title: "Cancel")) }
         options += [PopupOption(id: "separator", title: ""), PopupOption(id: "disabled", title: "Disabled")]
         return options
@@ -738,6 +747,15 @@ private struct KeyInspector: View {
     }
     @ViewBuilder private var actionForm: some View {
         switch model.binding.kind {
+        case .appSwitcher:
+            Label("App Switcher", systemImage: "rectangle.on.rectangle")
+            Text("Hold for 0.6 seconds to open the macOS app switcher. Keep holding and turn the knob to select an app; release to switch. Turning normally resumes after release.")
+                .font(.caption).foregroundStyle(.secondary)
+        case .mouse:
+            Text("Mouse action").font(.callout).foregroundStyle(.secondary)
+            FullWidthPopup(title: "Mouse action", selection: SwiftUI.Binding(get: { String(model.binding.usage) }, set: { if let usage = Int($0), MouseAction(rawValue: usage) != nil { model.binding.usage = usage } }), options: MouseAction.allCases.map { PopupOption(id: String($0.rawValue), title: $0.title) }).frame(height: 32)
+            Text("Scroll one wheel step per trigger. Scrolling follows the pointer and macOS mouse settings.")
+                .font(.caption).foregroundStyle(.secondary)
         case .media:
             Text("Media action").font(.callout).foregroundStyle(.secondary)
             FullWidthPopup(title: "Media action", selection: SwiftUI.Binding(get: { String(model.binding.usage) }, set: { if let usage = Int($0), MediaAction(rawValue: usage) != nil { model.binding.usage = usage } }), options: MediaAction.allCases.map { PopupOption(id: String($0.rawValue), title: $0.title) })
@@ -755,6 +773,23 @@ private struct KeyInspector: View {
         case .application:
             TextField("Application path", text: $model.hostValue).textFieldStyle(.roundedBorder)
             Button { model.chooseHostFile(application: true) } label: { Text("Choose application…").frame(maxWidth: .infinity) }
+                .background(GeometryReader { geometry in
+                    Color.clear.preference(key: ApplicationButtonHeight.self, value: geometry.size.height)
+                })
+                .onPreferenceChange(ApplicationButtonHeight.self) { height in
+                    if height > 0 { applicationButtonHeight = height }
+                }
+            HStack(spacing: 8) {
+                if let icon = BoardModel.finderApplicationIcon {
+                    Button { model.chooseFinderApplication() } label: {
+                        Image(nsImage: icon).resizable().scaledToFit()
+                            .frame(width: min(20, applicationButtonHeight - 6), height: min(20, applicationButtonHeight - 6))
+                            .frame(width: applicationButtonHeight, height: applicationButtonHeight)
+                    }
+                    .buttonStyle(ApplicationQuickButtonStyle())
+                    .help("Choose Finder").accessibilityLabel("Choose Finder")
+                }
+            }.frame(maxWidth: .infinity, alignment: .leading)
         case .open:
             TextField(actionChoice.wrappedValue == "file" ? "File or folder path" : "https://example.com", text: $model.hostValue).textFieldStyle(.roundedBorder)
             if actionChoice.wrappedValue == "file" { Button { model.chooseHostFile(application: false) } label: { Text("Choose file or folder…").frame(maxWidth: .infinity) } }
@@ -767,6 +802,22 @@ private struct KeyInspector: View {
         case .cancel: Label("Cancel", systemImage: "xmark")
         case .disabled: Label("Disabled", systemImage: "nosign").foregroundStyle(.secondary)
         }
+    }
+}
+
+private struct ApplicationButtonHeight: PreferenceKey {
+    static var defaultValue: CGFloat = 28
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+private struct ApplicationQuickButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var enabled
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(RoundedRectangle(cornerRadius: 5)
+                .fill(Color(nsColor: configuration.isPressed ? .selectedControlColor : .controlColor)))
+            .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(.quaternary, lineWidth: 0.5))
+            .contentShape(RoundedRectangle(cornerRadius: 5))
+            .opacity(enabled ? 1 : 0.45)
     }
 }
 
@@ -852,13 +903,16 @@ private enum ActionImageCache {
 
 }
 struct ActionIcon: View {
+    static func importedImage(_ image: NSImage, presentation: KeyPresentation) -> Image {
+        Image(nsImage: image).renderingMode(presentation.imageIsTemplate == true ? .template : .original)
+    }
     let presentation: KeyPresentation
     let application: String?
     let codex: Bool
     var body: some View {
         Group {
             if codex { Image("CodexMark").resizable().scaledToFit() }
-            else if let data = presentation.image, let image = NSImage(data: data) { Image(nsImage: image).resizable().scaledToFit() }
+            else if let data = presentation.image, let image = NSImage(data: data) { Self.importedImage(image, presentation: presentation).resizable().scaledToFit() }
             else if presentation.symbol == "folder" { Image("FolderAction").resizable().scaledToFit() }
             else if presentation.symbol == "globe" { Image("URLAction").resizable().scaledToFit() }
             else if presentation.symbol == "text.alignleft" { Image("PasteAction").resizable().scaledToFit() }
@@ -924,7 +978,7 @@ private struct BatteryGauge: View {
     let percent: Int
     let known: Bool
     let charging: Bool
-    private var tint: Color { charging ? .green : known && percent <= 10 ? .red : .gray }
+    private var tint: Color { charging ? .green : known && percent <= 5 ? .red : known && percent <= 15 ? .orange : .gray }
     var body: some View {
         HStack(spacing: 2) {
             ZStack(alignment: .leading) {
@@ -948,6 +1002,7 @@ struct FullWidthPopup: NSViewRepresentable {
     let title: String
     @SwiftUI.Binding var selection: String
     let options: [PopupOption]
+    var compactTitle = false
     @Environment(\.isEnabled) private var enabled
     func makeCoordinator() -> Coordinator { Coordinator(selection: $selection) }
     func makeNSView(context: Context) -> NSPopUpButton {
@@ -974,6 +1029,10 @@ struct FullWidthPopup: NSViewRepresentable {
         }
         if let index = options.firstIndex(where: { $0.id == selection }), button.indexOfSelectedItem != index { button.selectItem(at: index) }
         button.isEnabled = enabled
+        if compactTitle {
+            button.cell?.lineBreakMode = .byTruncatingTail
+            button.toolTip = button.selectedItem?.title
+        }
         button.setAccessibilityLabel(title)
     }
     final class Coordinator: NSObject {

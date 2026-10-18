@@ -21,9 +21,11 @@ final class JoystickOverlayController {
     private let display = Display()
     private var panel: NSPanel?
     private var gesture: UInt32?
-    func hide() { panel?.orderOut(nil); gesture = nil }
+    private(set) var displayedLayer: Int?
+    func hide() { panel?.orderOut(nil); gesture = nil; displayedLayer = nil }
     func update(_ frame: JoystickFrame, icons: () -> [Icon]) {
         guard frame.visible else { hide(); return }
+        displayedLayer = frame.layer
         if panel == nil {
             let panel = Panel(contentRect: NSRect(x: 0, y: 0, width: 260, height: 260),
                               styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
@@ -50,7 +52,7 @@ final class JoystickOverlayController {
     }
     static func icon(presentation: KeyPresentation, application: String?, disabled: Bool) -> Icon {
         let image: Image
-        if let data = presentation.image, let value = NSImage(data: data) { image = Image(nsImage: value) }
+        if let data = presentation.image, let value = NSImage(data: data) { image = ActionIcon.importedImage(value, presentation: presentation) }
         else if presentation.symbol == "folder" { image = Image("FolderAction") }
         else if presentation.symbol == "globe" { image = Image("URLAction") }
         else if presentation.symbol == "text.alignleft" { image = Image("PasteAction") }

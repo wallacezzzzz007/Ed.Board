@@ -133,6 +133,32 @@ int main(int argc,char **argv){
  assert(from7.writable() && from7.current().resolve(config.layers[1].id,5).usage==181);
  assert(from7.current().favorites.size()==6);assert(from7.save(from7.current()));
  assert(!blobs.count("snapshot7") && blobs.count("snapshot8"));blobs=latest;
+ // Native Mouse actions fit the existing compact format and survive NVS reload.
+ auto mouse=config;mouse.layers[1].bindings[0]={Kind::Mouse,1};
+ mouse.layers[1].bindings[14]={Kind::Mouse,2};mouse.layers[1].bindings[16]={Kind::Mouse,1};
+ mouse.layers[2].bindings[0]={Kind::Inherit,0,0,mouse.layers[1].id};
+ assert(valid_config(mouse));json=encode_config(mouse);assert(decode_config(json,decoded));cJSON_Delete(json);
+ assert(decoded.resolve(mouse.layers[2].id,0).kind==Kind::Mouse);
+ assert(decoded.resolve(mouse.layers[1].id,14).usage==2);
+ auto badMouse=mouse;badMouse.layers[1].bindings[0].usage=3;assert(!valid_config(badMouse));
+ badMouse=mouse;badMouse.layers[1].bindings[0].modifiers=1;assert(!valid_config(badMouse));
+ badMouse=mouse;badMouse.layers[1].bindings[0].source=1;assert(!valid_config(badMouse));
+ badMouse=mouse;badMouse.layers[1].bindings[0].key_count=1;assert(!valid_config(badMouse));
+ ConfigStore mouseStore;mouseStore.load();assert(mouseStore.writable());assert(mouseStore.save(mouse));
+ ConfigStore mouseReload;mouseReload.load();assert(mouseReload.writable());
+ assert(mouseReload.current().resolve(mouse.layers[1].id,0).kind==Kind::Mouse);
+ assert(mouseReload.current().resolve(mouse.layers[1].id,14).usage==2);
+ // App Switcher is only valid at ordinary-layer knob hold and persists without layout changes.
+ auto switcher=config;switcher.layers[1].bindings[20]={Kind::AppSwitcher};
+ switcher.layers[2].bindings[20]={Kind::Inherit,0,0,switcher.layers[1].id};
+ assert(valid_config(switcher));json=encode_config(switcher);assert(decode_config(json,decoded));cJSON_Delete(json);
+ assert(decoded.resolve(switcher.layers[2].id,20).kind==Kind::AppSwitcher);
+ assert(mouseReload.save(switcher));ConfigStore switchReload;switchReload.load();assert(switchReload.writable());
+ assert(switchReload.current().resolve(switcher.layers[1].id,20).kind==Kind::AppSwitcher);
+ for(unsigned control=0;control<25;++control)if(control!=20){auto bad=switcher;bad.layers[1].bindings[control]={Kind::AppSwitcher};assert(!valid_config(bad));}
+ for(unsigned field=0;field<4;++field){auto bad=switcher;auto &b=bad.layers[1].bindings[20];
+   if(field==0)b.usage=1;else if(field==1)b.modifiers=8;else if(field==2)b.source=2;else b.key_count=1;assert(!valid_config(bad));}
+ auto badSwitcher=switcher;badSwitcher.layers[0].bindings[20]={Kind::AppSwitcher};assert(!valid_config(badSwitcher));
  // A corrupt newest snapshot must not silently activate stale settings.
  blobs["snapshot8"].pop_back();ConfigStore corrupt;corrupt.load();assert(!corrupt.writable());
  AutoLayerPolicy policy;

@@ -2,6 +2,7 @@
 // Battery conversion adapted from AI Micro Basic (MIT); see vendor/LICENSE.
 #include "inputs.hpp"
 #include "input_calibration.hpp"
+#include "battery_estimate.hpp"
 #include <atomic>
 #include "esp_adc/adc_cali_scheme.h"
 #include <cinttypes>
@@ -109,6 +110,7 @@ void input_task(void *) {
     Debounce keys[14], touched;
     uint32_t sequence = 0;
     int64_t next_battery = 0;
+    BatteryEstimate battery_estimate;
     int64_t next_sample = 0, next_report = 0;
     InputCalibration calibration;
     bool calibration_controls_released = true;
@@ -271,7 +273,7 @@ void input_task(void *) {
             portENTER_CRITICAL(&snapshot_lock);
             snapshot.battery_valid=valid;
             snapshot.battery_mv=valid?mv*2:0;
-            snapshot.battery_percent=valid?std::clamp((mv*2-3300)*100/900,0,100):0;
+            snapshot.battery_percent=battery_estimate.update(mv*2,valid,charging,full);
             snapshot.charging=charging; snapshot.full=full;
             portEXIT_CRITICAL(&snapshot_lock);
         }

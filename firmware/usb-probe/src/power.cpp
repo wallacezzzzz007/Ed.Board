@@ -12,7 +12,7 @@ bool valid(const Stored &s) {return s.version==3&&s.revision<=0x7fffffff&&s.minu
 bool legacy_valid(const Stored &s) {return s.version==2&&s.revision<=0x7fffffff&&s.minutes>=1&&s.minutes<=120&&s.enabled<=1&&s.deepMinutes>=1&&s.deepMinutes<=1440&&s.keepConnected<=1&&(!s.enabled||s.deepMinutes>s.minutes);}
 }
 void Power::load() {
-    lastActivity_=esp_timer_get_time();
+    lastActivity_=lastDeepActivity_=esp_timer_get_time();
     nvs_handle_t h=0;
     if(nvs_open_from_partition("edboard","power",NVS_READWRITE,&h)!=ESP_OK)return;
     Stored s{};size_t size=sizeof(s);
@@ -43,10 +43,14 @@ const char *Power::save(unsigned seconds,bool enabled,unsigned deepMinutes,bool 
     seconds_=seconds;enabled_=enabled;deepMinutes_=deepMinutes;keepConnected_=keepConnected;revision_=s.revision;
     activity(esp_timer_get_time());return nullptr;
 }
-void Power::tick(int64_t now,bool usb,bool held,bool pairing) {
-    if(usb||held||pairing){activity(now);return;}
-    deepDue_=writable_&&!keepConnected_&&now-lastActivity_>=int64_t(deepMinutes_)*60000000;
+void Power::tick(int64_t now,bool externalPower,bool held,bool pairing) {
+    if(held||pairing){activity(now);return;}
+    // Lighting uses the same physical-input timer on battery and external power.
     sleeping_=writable_&&enabled_&&now-lastActivity_>=int64_t(seconds_)*1000000;
+    // External power inhibits deep sleep without waking the lights. Unplugging
+    // starts a fresh deep-sleep interval rather than sleeping immediately.
+    if(externalPower)lastDeepActivity_=now;
+    deepDue_=writable_&&!externalPower&&!keepConnected_&&now-lastDeepActivity_>=int64_t(deepMinutes_)*60000000;
 }
 cJSON *Power::json() const {
     auto *r=cJSON_CreateObject();

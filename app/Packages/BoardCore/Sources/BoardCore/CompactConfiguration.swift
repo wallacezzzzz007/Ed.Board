@@ -10,7 +10,7 @@ extension BoardConfiguration {
             for i in 0..<count { bytes.append(UInt8(truncatingIfNeeded: value >> (8 * i))) }
         }
         for id in favorites { put(id) }
-        let kinds: [ActionKind] = [.native, .shortcut, .disabled, .inherit, .application, .open, .text, .cancel, .media]
+        let kinds: [ActionKind] = [.native, .shortcut, .disabled, .inherit, .application, .open, .text, .cancel, .media, .mouse, .appSwitcher]
         for layer in layers {
             let name = Array(layer.name.utf8)
             put(layer.id); put(name.count); bytes.append(contentsOf: name)
@@ -24,7 +24,7 @@ extension BoardConfiguration {
                     else { for key in b.keys { put(key) } }
                 case .inherit: put(b.source)
                 case .application, .open, .text: put(b.source, 4)
-                case .media: put(b.usage)
+                case .media, .mouse: put(b.usage)
                 default: break
                 }
             }
@@ -60,7 +60,7 @@ extension BoardConfiguration {
         guard (1...16).contains(count), (1...6).contains(favoriteCount) else { throw RPCError(code: "invalid_config") }
         self.init(); favorites = []; layers = []
         for _ in 0..<favoriteCount { favorites.append(try get()) }
-        let kinds: [ActionKind] = [.native, .shortcut, .disabled, .inherit, .application, .open, .text, .cancel, .media]
+        let kinds: [ActionKind] = [.native, .shortcut, .disabled, .inherit, .application, .open, .text, .cancel, .media, .mouse, .appSwitcher]
         for _ in 0..<count {
             let id = try get(), length = try get()
             guard (1...48).contains(length), at + length <= data.count,
@@ -81,7 +81,7 @@ extension BoardConfiguration {
                     else { for _ in 0..<keyCount { b.keys.append(try get()) } }
                 case .inherit: b.source = try get()
                 case .application, .open, .text: b.source = try get(4)
-                case .media: b.usage = try get()
+                case .media, .mouse: b.usage = try get()
                 default: break
                 }
                 layer.bindings[i] = b

@@ -34,6 +34,8 @@ final class BoardModel: ObservableObject {
     var menuStatusVisible = false
     private var statusVisible = false
 
+    @Published private(set) var batteryWarningLevel = 0
+    private var batteryTimer: Timer?
     private var statusSent = Date.distantPast
     private var statusRetryAfter = Date.distantPast
     @Published private var statusUnavailable = false
@@ -258,7 +260,7 @@ final class BoardModel: ObservableObject {
             Task { @MainActor in self?.updateForeground() }
         }.store(in: &observers)
         center.publisher(for: NSWorkspace.willSleepNotification).sink { [weak self] _ in
-            Task { @MainActor in guard let self else { return }; self.sleeping = true; self.invalidateJoystick(); self.syncJoystickWatch(); AppLog.shared.event("Mac sleeping"); self.resetPreview(); self.hostExecutor.cancel(); self.hostGate.reset(); self.reconnectWork?.cancel(); self.reconnectWork = nil; self.autoTimer?.invalidate(); self.autoTimer = nil
+            Task { @MainActor in guard let self else { return }; self.sleeping = true; self.batteryTimer?.invalidate(); self.batteryTimer = nil; self.invalidateJoystick(); self.syncJoystickWatch(); AppLog.shared.event("Mac sleeping"); self.resetPreview(); self.hostExecutor.cancel(); self.hostGate.reset(); self.reconnectWork?.cancel(); self.reconnectWork = nil; self.autoTimer?.invalidate(); self.autoTimer = nil
                 if let activity = self.automaticActivity { ProcessInfo.processInfo.endActivity(activity); self.automaticActivity = nil } }
         }.store(in: &observers)
         center.publisher(for: NSWorkspace.didWakeNotification).sink { [weak self] _ in
@@ -323,6 +325,7 @@ final class BoardModel: ObservableObject {
     }
     func disconnect(manual: Bool = true) {
         AppLog.shared.connection(manual ? "disconnected manually" : "disconnected")
+        batteryTimer?.invalidate(); batteryTimer = nil; batteryWarningLevel = 0
         invalidateJoystick(); joystickWatchTarget = nil; joystickUnavailable = false
         hostExecutor.cancel(); hostGate.reset(); resetPreview(); deviceStatus = nil; statusSent = .distantPast; statusRetryAfter = .distantPast; statusUnavailable = false
         pairingBound = nil; pairingReady = false; pairingConnected = false
@@ -364,6 +367,14 @@ final class BoardModel: ObservableObject {
     var effectiveDescription: String {
         draft.resolved(layer: layer.id, control: selectedControl)?.description ?? "Invalid inheritance"
     }
+    var desktopOverlayEnabled: Bool {
+        get { presentation.showsDesktopOverlay(layer: selectedLayer) }
+        set {
+            guard canEdit, presentationReadable, selectedLayer != 1 else { return }
+            presentation.setDesktopOverlay(newValue, layer: selectedLayer)
+        }
+    }
+    var canEditDesktopOverlay: Bool { canEdit && presentationReadable && selectedLayer != 1 }
     var quickSelectionSource: Int { QuickSelection.source(in: draft, layer: selectedLayer) ?? 0 }
     var quickSelectionSources: [Layer] {
         draft.layers.filter { QuickSelection.inheriting(draft, layer: selectedLayer, source: $0.id) != nil }
@@ -438,12 +449,15 @@ final class BoardModel: ObservableObject {
         guard !quickSelectionLocked, selectedControl < 13 || selectedLayer != 1 else { return }
         guard kind != .native || (selectedLayer == 1 && selectedControl < 13) else { return }
         guard kind != .cancel || Control.isStick(selectedControl) else { return }
+        guard kind != .appSwitcher || (selectedControl == 20 && info?.appSwitcherVersion == 1) else { return }
+        if kind == .inherit && binding.kind == .inherit { return }
         let key = "\(layer.id):\(selectedControl)"
         if kind == .inherit && binding.kind != .inherit { directBindings[key] = binding }
         if binding.kind == .inherit, kind != .inherit, let previous = directBindings[key], previous.kind == kind { binding = previous; return }
-        if kind == .media { guard info?.mediaVersion == 1 else { return }; binding = BoardCore.Binding(kind: .media, usage: MediaAction.playPause.rawValue) }
+        if kind == .mouse { guard info?.mouseVersion == 1 else { return }; binding = BoardCore.Binding(kind: .mouse, usage: MouseAction.wheelUp.rawValue) }
+        else if kind == .media { guard info?.mediaVersion == 1 else { return }; binding = BoardCore.Binding(kind: .media, usage: MediaAction.playPause.rawValue) }
         else if kind == .shortcut { binding = BoardCore.Binding(kind: kind) }
-        else if kind == .inherit { binding = BoardCore.Binding(kind: kind, source: selectedControl >= 13 ? (draft.layers.first { $0.id != layer.id && $0.id != 1 }?.id ?? 0) : (layer.id != 1 ? 1 : (draft.layers.first { $0.id != layer.id }?.id ?? 0))) }
+        else if kind == .inherit { binding = BoardCore.Binding(kind: kind, source: draft.defaultInheritanceSource(layer: layer.id, control: selectedControl) ?? 0) }
         else { binding = BoardCore.Binding(kind: kind) }
         pruneHostDraft()
     }
@@ -545,7 +559,7 @@ final class BoardModel: ObservableObject {
             guard let value = try? JSONDecoder().decode(Envelope<DeviceStatus>.self, from: data).result,
                   (0...100).contains(value.battery), (0...1).contains(value.bonds) else { statusReadFailed(); return }
             statusUnavailable = false; statusRetryAfter = .distantPast
-            deviceStatus = value; pairingBound = value.bonds > 0; pairingConnected = value.connected; pairingReady = value.ready
+            deviceStatus = value; updateBatteryWarning(); pairingBound = value.bonds > 0; pairingConnected = value.connected; pairingReady = value.ready
             return
         }
         if p.method == "joystick.watch" {
@@ -659,7 +673,7 @@ final class BoardModel: ObservableObject {
                     disconnect(); errorText = "Device identity differs from the remembered keyboard. Auto-connect stopped."; return
                 }
                 if lastInfo?.serial != result.serial { powerState = nil }
-                info = result; lastInfo = result; migrationNotice = result.migrationNote ?? ""
+                info = result; updateBatteryWarning(); lastInfo = result; migrationNotice = result.migrationNote ?? ""
                 loadHostActions(serial: result.serial); loadPresentation(serial: result.serial)
                 connectionPreference = ConnectionPreference(serial: result.serial, automatic: true, bluetooth: connectionPreference.bluetooth)
                 saveConnectionPreference(); reconnectAttempt = 0
@@ -812,6 +826,7 @@ extension BoardModel {
         pumpAuto()
     }
     private func configureAutoTimer() {
+        configureBatteryTimer()
         guard connected, !sleeping, settingsReadable, snapshot != nil, hasAutoRules || hasHostActions || lastAutoLayer > 0 else {
             autoTimer?.invalidate(); autoTimer = nil
             if let activity = automaticActivity { ProcessInfo.processInfo.endActivity(activity); automaticActivity = nil }
@@ -965,6 +980,13 @@ extension BoardModel {
         if hostDraft[binding.source]?.isValid != true { return "Choose a target or enter valid content. URLs require https:// or http://; text is limited to 4096 UTF-8 bytes." }
         return "Ed.Board must be running. Content is stored locally and activated after saving to the keyboard."
     }
+    static let finderApplicationURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.finder")
+    static let finderApplicationIcon = finderApplicationURL.map { NSWorkspace.shared.icon(forFile: $0.path) }
+    func chooseFinderApplication() {
+        guard canEdit, !quickSelectionLocked, binding.kind == .application,
+              let url = Self.finderApplicationURL else { return }
+        hostValue = url.path
+    }
     func chooseHostFile(application: Bool) {
         guard canEdit, binding.kind.isHost else { return }
         let panel = NSOpenPanel()
@@ -1035,7 +1057,7 @@ extension BoardModel {
 extension BoardModel {
     var currentPresentation: KeyPresentation {
         get { presentation.keys["\(selectedLayer):\(selectedControl)"] ?? KeyPresentation() }
-        set { guard binding.kind == .shortcut || binding.kind == .media else { return }; presentation.keys["\(selectedLayer):\(selectedControl)"] = newValue }
+        set { guard binding.kind == .shortcut || binding.kind == .media || binding.kind == .mouse else { return }; presentation.keys["\(selectedLayer):\(selectedControl)"] = newValue }
     }
     func presentationFor(layer id: Int, control: Int) -> KeyPresentation {
         let custom = presentation.resolved(config: draft, layer: id, control: control)
@@ -1078,7 +1100,12 @@ extension BoardModel {
             let data = try JSONEncoder().encode(presentation)
             guard data.count < 12_000_000 else { throw RPCError(code: "appearance_too_large") }
             try data.write(to: target, options: .atomic)
-            if markSaved { savedPresentation = presentation }
+            if markSaved {
+                savedPresentation = presentation
+                if let layer = joystickOverlay.displayedLayer, !savedPresentation.showsDesktopOverlay(layer: layer) {
+                    joystickOverlay.hide()
+                }
+            }
             return true
         } catch { errorText = "Could not save key names and images. Your draft is retained."; return false }
     }
@@ -1098,24 +1125,19 @@ extension BoardModel {
         } catch { errorText = "Keyboard saved; app links could not be saved. Retry Save changes." }
     }
     func chooseKeyImage() {
-        let panel = NSOpenPanel(); panel.allowedContentTypes = [.png, .jpeg, .tiff]; panel.allowsMultipleSelection = false
+        let panel = NSOpenPanel(); panel.allowedContentTypes = [.png, .jpeg, .tiff, .svg]; panel.allowsMultipleSelection = false
+        panel.directoryURL = KeyImageImport.lastDirectory()
         let layerID = selectedLayer, control = selectedControl, serial = hostSerial
         panel.begin { [weak self] response in
             Task { @MainActor in
                 guard let self, response == .OK, let url = panel.url, self.hostSerial == serial,
                       self.selectedLayer == layerID, self.selectedControl == control, self.canEdit,
-                      (self.binding.kind == .shortcut || self.binding.kind == .media) else { return }
-                guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 8_000_000,
-                      let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-                      let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [
-                        kCGImageSourceCreateThumbnailFromImageAlways: true,
-                        kCGImageSourceThumbnailMaxPixelSize: 128,
-                        kCGImageSourceCreateThumbnailWithTransform: true
-                      ] as CFDictionary),
-                      let data = NSBitmapImageRep(cgImage: thumbnail).representation(using: .png, properties: [:]), data.count <= 131072 else {
-                    self.errorText = "Choose a PNG, JPEG or TIFF image smaller than 8 MB."; return
+                      (self.binding.kind == .shortcut || self.binding.kind == .media || self.binding.kind == .mouse) else { return }
+                guard let data = KeyImageImport.png(from: url) else {
+                    self.errorText = "Could not import image. Choose a valid PNG, JPEG, TIFF or SVG smaller than 8 MB. SVG must be renderable by macOS."; return
                 }
-                self.currentPresentation.image = data; self.currentPresentation.symbol = ""
+                self.currentPresentation.setImportedImage(data, template: url.pathExtension.lowercased() == "svg")
+                KeyImageImport.rememberDirectory(of: url)
 
             }
         }
@@ -1170,7 +1192,8 @@ extension BoardModel {
         guard connected, !sleeping, !pairingBusy, firmwareReady, joystickWatchTarget == true,
               !joystickUnavailable, joystickGate.accept(frame, token: joystickToken) else { return }
         guard frame.visible, let snapshot, snapshot.revision == frame.revision,
-              snapshot.config.layers.contains(where: { $0.id == frame.layer }), frame.layer != 1 else {
+              snapshot.config.layers.contains(where: { $0.id == frame.layer }),
+              savedPresentation.showsDesktopOverlay(layer: frame.layer) else {
             joystickOverlay.hide(); return
         }
         joystickOverlay.update(frame) {
@@ -1236,28 +1259,49 @@ extension BoardModel {
 }
 
 extension BoardModel {
-    var batteryPercent: Int { deviceStatus?.battery ?? info?.battery ?? 0 }
-    var batteryKnown: Bool { connected && (deviceStatus?.batteryValid ?? info?.batteryValid ?? false) }
-    var batteryCharging: Bool { connected && (deviceStatus?.charging ?? info?.charging ?? false) }
-    var batteryFull: Bool { connected && (deviceStatus?.full ?? info?.full ?? false) }
+    private var batteryState: BatteryStatus {
+        BatteryStatus(known: connected && (deviceStatus?.batteryValid ?? info?.batteryValid ?? false),
+            percent: deviceStatus?.battery ?? info?.battery ?? 0,
+            charging: deviceStatus?.charging ?? info?.charging ?? false,
+            full: deviceStatus?.full ?? info?.full ?? false)
+    }
+    var batteryPercent: Int { batteryState.percent }
+    private func updateBatteryWarning() { batteryWarningLevel = batteryState.warningLevel }
+    var batteryWarning: String? {
+        batteryWarningLevel == 2 ? "Battery very low — charge now. Input may become unreliable." :
+            batteryWarningLevel == 1 ? "Low battery — charge soon." : nil
+    }
+    private func configureBatteryTimer() {
+        guard connected, !sleeping, snapshot != nil, supportsSeconds else {
+            batteryTimer?.invalidate(); batteryTimer = nil; return
+        }
+        guard batteryTimer == nil else { return }
+        let timer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.statusTick() }
+        }
+        timer.tolerance = 5; batteryTimer = timer; RunLoop.main.add(timer, forMode: .common)
+    }
+    var batteryKnown: Bool { batteryState.known }
+    var batteryCharging: Bool { batteryState.charging }
+    var batteryFull: Bool { batteryState.full }
     var batteryLabel: String {
         guard connected, deviceStatus?.batteryValid ?? info?.batteryValid ?? false else { return "Unavailable" }
-        let percent = deviceStatus?.battery ?? info?.battery ?? 0
+        let percent = batteryPercent
         return "\(percent)%" + (statusUnavailable || !supportsSeconds ? " · Last Read" : "")
     }
     var batterySymbol: String {
-        let value = deviceStatus?.battery ?? info?.battery ?? 0
+        let value = batteryPercent
         return value > 75 ? "battery.100" : value > 50 ? "battery.75" : value > 25 ? "battery.50" : value > 5 ? "battery.25" : "battery.0"
     }
     func setStatusVisible(_ visible: Bool) { statusVisible = visible; if visible { statusSent = .distantPast } }
     private func statusReadFailed() {
         statusUnavailable = true
-        // Reuse the existing visible-page/menu ticks; no background retry timer.
+        // One-minute background checks and visible-page ticks share the same retry cooldown.
         statusRetryAfter = Date().addingTimeInterval(60)
     }
     func statusTick() {
-        guard (statusVisible || menuStatusVisible), connected, !sleeping, !busy, pending == nil, !pairingBusy,
-              supportsSeconds, Date() >= statusRetryAfter, Date().timeIntervalSince(statusSent) >= 15 else { return }
+        guard connected, snapshot != nil, !sleeping, !firmware.active, !busy, pending == nil, !pairingBusy,
+              supportsSeconds, Date() >= statusRetryAfter, Date().timeIntervalSince(statusSent) >= ((statusVisible || menuStatusVisible) ? 15 : 60) else { return }
         statusSent = Date(); request("device.status", params: EmptyParams())
     }
 }
@@ -1378,5 +1422,57 @@ extension BoardModel {
             restoredFirmwareDraft = true
             errorText = "Recovered local draft. Review it before saving; device settings were not overwritten."
         } catch { firmware.fail("Could not restore the local draft. The backup is retained for inspection: \(error.localizedDescription)", settings: true) }
+    }
+}
+
+// Image import stores only a rendered PNG. The source location is a local picker
+// preference, never part of a device configuration, appearance export or log.
+enum KeyImageImport {
+    private static let directoryKey = "keyImageImportDirectory"
+    static func lastDirectory(defaults: UserDefaults = .standard) -> URL? {
+        guard let path = defaults.string(forKey: directoryKey), path.hasPrefix("/") else { return nil }
+        let url = URL(fileURLWithPath: path, isDirectory: true)
+        guard let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isReadableKey]),
+              values.isDirectory == true, values.isReadable == true else { return nil }
+        return url
+    }
+    static func rememberDirectory(of image: URL, defaults: UserDefaults = .standard) {
+        defaults.set(image.deletingLastPathComponent().path, forKey: directoryKey)
+    }
+    static func png(from url: URL) -> Data? {
+        guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+              size > 0, size <= 8_000_000 else { return nil }
+        if url.pathExtension.lowercased() == "svg" { return svgPNG(from: url) }
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceThumbnailMaxPixelSize: 128,
+                kCGImageSourceCreateThumbnailWithTransform: true
+              ] as CFDictionary),
+              let data = NSBitmapImageRep(cgImage: thumbnail).representation(using: .png, properties: [:]),
+              data.count <= 131072 else { return nil }
+        return data
+    }
+    private static func svgPNG(from url: URL) -> Data? {
+        guard let data = try? Data(contentsOf: url), data.count <= 8_000_000,
+              let image = NSImage(data: data), image.isValid,
+              image.size.width.isFinite, image.size.height.isFinite,
+              image.size.width > 0, image.size.height > 0 else { return nil }
+        let longest = max(image.size.width, image.size.height)
+        let width = max(1, Int((128 * (image.size.width / longest)).rounded()))
+        let height = max(1, Int((128 * (image.size.height / longest)).rounded()))
+        guard let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height,
+              bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+              colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+              let context = NSGraphicsContext(bitmapImageRep: bitmap) else { return nil }
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        NSGraphicsContext.current = context
+        let rect = NSRect(x: 0, y: 0, width: width, height: height)
+        context.cgContext.clear(rect)
+        image.draw(in: rect, from: .zero, operation: .copy, fraction: 1,
+                   respectFlipped: false, hints: [.interpolation: NSImageInterpolation.high])
+        guard let png = bitmap.representation(using: .png, properties: [:]), png.count <= 131072 else { return nil }
+        return png
     }
 }

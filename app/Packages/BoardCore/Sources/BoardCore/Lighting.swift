@@ -27,6 +27,16 @@ extension Layer {
         bindings[control] = value
     }
 
+    public mutating func setCustomLight(_ enabled: Bool, control: Int) {
+        guard keyLights.indices.contains(control) else { return }
+        if !enabled { keyLights[control] = nil }
+        else if keyLights[control] == nil {
+            var value = keysLight
+            value.effect = 1 // A new custom override starts with Solid, independently of the layer effect.
+            keyLights[control] = value
+        }
+    }
+
     public var keysLight: LightSpec {
         get { LightSpec(effect: effects[0], color: color, brightness: brightness, active: effects[1]) }
         set { if effects[3] < 0 { effects[3] = brightness }; color = newValue.color; brightness = newValue.brightness; effects[0] = newValue.effect; effects[1] = newValue.active }

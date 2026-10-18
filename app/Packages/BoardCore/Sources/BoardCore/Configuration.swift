@@ -1,11 +1,11 @@
 import Foundation
 
 public enum ActionKind: String, Codable, CaseIterable, Identifiable {
-    case native, shortcut, disabled, inherit, application, open, text, cancel, media
+    case native, shortcut, disabled, inherit, application, open, text, cancel, media, mouse, appSwitcher
     public var isHost: Bool { self == .application || self == .open || self == .text }
     public var id: String { rawValue }
     public var title: String {
-        switch self { case .media: return "Media Control"; case .cancel: return "Cancel"; case .native: return "Managed by Codex"; case .shortcut: return "Shortcut"; case .disabled: return "Disabled"; case .inherit: return "Inherit from layer"; case .application: return "Open application"; case .open: return "Open URL or file"; case .text: return "Insert text" }
+        switch self { case .appSwitcher: return "App Switcher"; case .mouse: return "Mouse Control"; case .media: return "Media Control"; case .cancel: return "Cancel"; case .native: return "Managed by Codex"; case .shortcut: return "Shortcut"; case .disabled: return "Disabled"; case .inherit: return "Inherit from layer"; case .application: return "Open application"; case .open: return "Open URL or file"; case .text: return "Insert text" }
     }
 }
 /// USB HID Consumer Page usages supported by the firmware.
@@ -33,6 +33,13 @@ public enum MediaAction: Int, CaseIterable, Identifiable {
         }
     }
 }
+/// Relative vertical wheel actions. The firmware sends no pointer motion or clicks.
+public enum MouseAction: Int, CaseIterable, Identifiable {
+    case wheelUp = 1, wheelDown = 2
+    public var id: Int { rawValue }
+    public var title: String { self == .wheelUp ? "Mouse Wheel Up" : "Mouse Wheel Down" }
+    public var symbol: String { self == .wheelUp ? "arrow.up" : "arrow.down" }
+}
 public enum LayerMode: String, Codable, CaseIterable { case native, custom }
 public struct Binding: Codable, Equatable {
     public var kind: ActionKind
@@ -59,6 +66,7 @@ public struct Binding: Codable, Equatable {
     public var isValid: Bool {
         if !keys.isEmpty { return kind == .shortcut && usage == 0 && modifiers == 0 && source == 0 && ShortcutKeys.valid(keys) }
         switch kind {
+        case .mouse: return MouseAction(rawValue: usage) != nil && modifiers == 0 && source == 0
         case .media: return MediaAction(rawValue: usage) != nil && modifiers == 0 && source == 0
         case .shortcut: return (4...115).contains(usage) && (0...15).contains(modifiers) && source == 0
         case .inherit: return usage == 0 && modifiers == 0 && (1...255).contains(source)
@@ -67,6 +75,7 @@ public struct Binding: Codable, Equatable {
         }
     }
     public var description: String {
+        if kind == .mouse { return MouseAction(rawValue: usage)?.title ?? kind.title }
         if kind == .media { return MediaAction(rawValue: usage)?.title ?? kind.title }
         if kind != .shortcut { return kind.title }
         if !keys.isEmpty { return keys.map(ShortcutKeys.title).joined(separator: " + ") }
@@ -164,6 +173,27 @@ public struct BoardConfiguration: Codable, Equatable {
         try c.encode(schemaVersion, forKey: .schemaVersion)
         try c.encode(compactPayload(), forKey: .payload)
     }
+    /// First eligible favorite, then an eligible extended layer. Retained plans
+    /// are checked even in native mode so a new default cannot create a cycle.
+    public func defaultInheritanceSource(layer destination: Int, control: Int) -> Int? {
+        guard (0..<25).contains(control), layers.contains(where: { $0.id == destination }),
+              !(destination == 1 && control >= 13) else { return nil }
+        let ordered = favoriteLayers + extendedLayers
+        return ordered.first { candidate in
+            guard candidate.id != destination, control < 13 || candidate.id != 1 else { return false }
+            var source = candidate.id
+            var seen: Set<Int> = [destination]
+            while seen.insert(source).inserted {
+                if control >= 13 && source == 1 { return false }
+                guard let value = layers.first(where: { $0.id == source }), value.bindings.indices.contains(control) else { return false }
+                let binding = value.bindings[control]
+                if binding.kind != .inherit { return true }
+                source = binding.source
+            }
+            return false
+        }?.id
+    }
+
     public var favoriteLayers: [Layer] { favorites.compactMap { id in layers.first { $0.id == id } } }
     public var extendedLayers: [Layer] { layers.filter { !favorites.contains($0.id) } }
     public mutating func setFavorite(_ id: Int, enabled: Bool) -> Bool {
@@ -227,6 +257,7 @@ public struct BoardConfiguration: Codable, Equatable {
                   layer.outerLight.valid, layer.outerLight.effect != 2, layer.keyLights.allSatisfy({ $0 == nil || ($0!.valid && $0!.effect <= 4) }) else { return "Invalid lighting settings. Active brightness must be at least base brightness." }
             for control in 0..<25 {
                 let b = layer.bindings[control]
+                if b.kind == .appSwitcher && control != 20 { return "App Switcher is only available for knob Press and hold." }
                 if b.kind == .cancel && !Control.isStick(control) { return "Cancel is only available for joystick directions." }
                 if control >= 13 {
                     if layer.id == 1 && b.kind != .native { return "Codex manages its knob and joystick." }
@@ -277,6 +308,8 @@ public struct DeviceInfo: Decodable {
     public let full: Bool?
     public let joystickVersion: Int?
     public let mediaVersion: Int?
+    public let mouseVersion: Int?
+    public let appSwitcherVersion: Int?
     public let previewVersion: Int?
     public let runtimeVersion: Int?
     public let writable: Bool
