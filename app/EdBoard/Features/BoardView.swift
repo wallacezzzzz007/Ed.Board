@@ -561,8 +561,61 @@ struct BoardView: View {
                     }
                     Text(model.powerMessage).font(.caption).foregroundStyle(.secondary)
                 }
+                InfoSection("Plugins") {
+                    Toggle("Obsidian", isOn: SwiftUI.Binding(get: { model.obsidianPlugin.enabled }, set: { model.obsidianPlugin.setEnabled($0) }))
+                        .disabled(!model.obsidianPlugin.readable)
+                    if model.obsidianPlugin.enabled {
+                        HStack {
+                            Text(model.obsidianPlugin.connectionStatus).font(.callout).foregroundStyle(.secondary)
+                            Spacer()
+                            if !model.obsidianPlugin.listening {
+                                Button("Retry") { model.obsidianPlugin.retry() }
+                            } else {
+                                Button("Pair…") { model.obsidianPlugin.pair() }
+                                Button("Disconnect") { model.obsidianPlugin.revoke() }
+                                    .disabled(model.obsidianPlugin.settings.credential == nil)
+                            }
+                        }
+                        if model.obsidianPlugin.pairingAvailable {
+                            HStack {
+                                Text("Copy this code into the Obsidian plugin within 2 minutes.").font(.caption).foregroundStyle(.secondary)
+                                Button("Copy Pairing Code") {
+                                    guard let code = model.obsidianPlugin.pairingCode else { return }
+                                    NSPasteboard.general.clearContents(); NSPasteboard.general.setString(code, forType: .string)
+                                }
+                            }
+                        }
+                        if model.snapshot != nil {
+                            HStack {
+                                Text("Default layer").frame(width: 130, alignment: .leading)
+                                FullWidthPopup(title: "Obsidian default layer", selection: SwiftUI.Binding(
+                                    get: { String(model.obsidianPlugin.mapping(serial: model.info?.serial).defaultLayer) },
+                                    set: { if let id = Int($0) { model.obsidianPlugin.setMapping(serial: model.info?.serial, defaultLayer: id) } }),
+                                    options: obsidianLayerOptions(selected: model.obsidianPlugin.mapping(serial: model.info?.serial).defaultLayer, fallback: "Use app matching"))
+                            }
+                            HStack {
+                                Text("Excalidraw layer").frame(width: 130, alignment: .leading)
+                                FullWidthPopup(title: "Obsidian Excalidraw layer", selection: SwiftUI.Binding(
+                                    get: { String(model.obsidianPlugin.mapping(serial: model.info?.serial).excalidrawLayer) },
+                                    set: { if let id = Int($0) { model.obsidianPlugin.setMapping(serial: model.info?.serial, excalidrawLayer: id) } }),
+                                    options: obsidianLayerOptions(selected: model.obsidianPlugin.mapping(serial: model.info?.serial).excalidrawLayer, fallback: "Use default layer"))
+                            }
+                        } else { Text("Connect a keyboard to choose layers.").font(.caption).foregroundStyle(.secondary) }
+                        Text("Requires the Obsidian companion plugin. Uses the focused document type only, while Obsidian is in front. Settings save automatically.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    if let error = model.obsidianPlugin.error { Text(error).font(.caption).foregroundStyle(.orange) }
+                }
             }.frame(maxWidth: .infinity, alignment: .leading).padding(32)
         }
+    }
+    private func obsidianLayerOptions(selected: Int, fallback: String) -> [PopupOption] {
+        let layers = model.snapshot?.config.layers ?? []
+        var options = [PopupOption(id: "0", title: fallback)] + layers.map { PopupOption(id: String($0.id), title: $0.name) }
+        if selected > 0 && !layers.contains(where: { $0.id == selected }) {
+            options.append(PopupOption(id: String(selected), title: "Missing layer", enabled: false))
+        }
+        return options
     }
     private var lightsSelection: SwiftUI.Binding<Int> {
         SwiftUI.Binding(get: { model.idleLightsEnabled ? model.idleSeconds : 0 }, set: { value in

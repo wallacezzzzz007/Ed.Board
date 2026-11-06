@@ -1,0 +1,9 @@
+{
+  "id": "edboard-bridge",
+  "name": "Ed.Board Bridge",
+  "version": "0.2.0",
+  "minAppVersion": "1.5.0",
+  "description": "Select an Ed.Board layer for the focused Markdown or Excalidraw view through a paired, local-only connection.",
+  "author": "Ed.Board contributors",
+  "isDesktopOnly": true
+}

@@ -56,6 +56,10 @@ Open **Keymap**, choose a layer, then select a key, knob action or joystick dire
 - **App Switcher:** assign it to the knob’s **Press and hold** in an ordinary layer. Hold for **0.6 seconds**, keep holding and turn clockwise/anticlockwise to select the next/previous app, then release. Short Click and normal turns keep their assigned actions.
 - **Icons:** choose an image up to **8 MB**. SVGs display as single-colour icons; other formats keep their colours. The picker remembers your last import folder, and saved icons do not depend on the original files.
 
+## Plugins
+
+Optional integrations are off by default under **Settings → Plugins**. The [Obsidian companion](plugins/obsidian/README.md) can choose separate layers for Markdown and Excalidraw. Install it in each vault, enable both ends and pair once on your Mac. Only the focused window controls the layer; no notes or file names are sent.
+
 ## Daily use
 
 Close the window to leave Ed.Board in the menu bar. Enable **System → Launch at Login** for background startup.
@@ -66,7 +70,7 @@ Battery percentage is an estimate. Low-battery warnings appear at **15%**, becom
 
 ## Firmware
 
-Current source: **App 0.6.6 (46) / firmware 0.6.6**. Releases may differ; use the App and firmware supplied together.
+Current source: **App 0.6.6 (48) / firmware 0.6.6**. Releases may differ; use the App and firmware supplied together.
 
 For a recognized, compatible keyboard, connect over **USB**, open **System → Device & Firmware**, and follow the update prompt. Close serial monitors and keep USB connected until verification finishes. The updater backs up settings and preserves device identity. Downgrading may require restoring a compatible backup.
 

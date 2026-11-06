@@ -2,7 +2,7 @@
 
 [README](../README.md) · [Third-party notices](THIRD_PARTY_NOTICES.md) · [License](../LICENSE)
 
-Ed.Board contains a native SwiftUI/AppKit App, a local Swift package and ESP-IDF firmware. Source versions: **App 0.6.6 (46)** and **firmware 0.6.6** (not yet released). Run the commands below from the repository root.
+Ed.Board contains a native SwiftUI/AppKit App, a local Swift package and ESP-IDF firmware. Source versions: **App 0.6.6 (48)** and **firmware 0.6.6** (not yet released). Run the commands below from the repository root.
 
 ## Changes since 0.5.3
 
@@ -165,3 +165,15 @@ New SVG imports set the optional `imageIsTemplate` appearance flag. Keymap, imag
 Firmware 0.6.6 advertises `appSwitcherVersion: 1`. `appSwitcher` is compact kind 10 with no payload, valid only for ordinary-layer control 20 (knob Press and hold); inheritance at the same control is supported. Schema 7 / snapshot 8 layout and HID services/report IDs are unchanged. Older firmware rejects this new action, so downgrades require a verified backup.
 
 After the 600 ms hold threshold, keyboard report 1 pulses Command+Tab and retains Command. Each held detent pulses Tab, adding Shift only for reverse selection. Release clears the temporary modifiers without a Click; normal detents and non-switcher holds retain their behavior. The temporary state merges into keyboard reports and is cleared by the existing release/resynchronization path on link, epoch, input fault or configuration changes. Switching neither changes the layer nor overrides existing application matching or locks. Codex knob behavior is unchanged. Offline checks: `python3 -B tools/joystick/test_app_switcher.py`.
+
+## Optional Obsidian integration
+
+The default-off Settings → Plugins section is independent of Keymap drafts. [Manual installation](../plugins/obsidian/README.md) uses `plugins/obsidian/edboard-bridge/main.js` and `manifest.json`; the JavaScript is also the source, with no build dependencies. It uses Obsidian's public workspace/view APIs and Node built-ins only. No automatic vault discovery, installation or configuration edits are performed.
+
+The App listens on IPv4 loopback only (`127.0.0.1:27124`) while enabled. A 256-bit, two-minute, single-use pairing code authorizes a credential exchange; credentials are saved atomically with mode 0600 outside the vault. The companion reports only view type, temporary client ID, focus timestamp and sequence, serializes/coalesces changes and sends a 5-second heartbeat while focused. Receiver state expires after 15 seconds. Revoke clears authority; disable closes the listener and cancels pending clients. Strict bounded HTTP/JSON parsing rejects external Host/Origin, chunked encoding, duplicate headers and extra payload fields. Requests, view types and credentials are not logged.
+
+Per-keyboard layer mappings feed the existing `runtime.auto` path only when the foreground bundle is `md.obsidian`; unavailable/stale state or missing mappings fall back to ordinary app matching. No firmware protocol or HID changes are needed. Tests: Swift `ObsidianBridgeTests`, `node tools/plugins/test_obsidian.js` (mocked Obsidian/HTTP/storage) and `python3 -B tools/plugins/test_store.py` (temporary local files). Live plugin/App and multi-vault/split/popout behavior require user acceptance testing.
+
+The 0.2.0 companion / App build 48 use `/v2/view` and `/v2/clear`. View reports contain `client`, `view`, `focus` (focus-acquisition time in milliseconds) and an increasing `sequence`. The receiver retains an ordering fence after lease expiry/clear, rejects older focus or sequence values, and accepts clear only from the same focus owner with a newer sequence. A still-focused sender retries a millisecond tie or pending foreground transition after 250 ms; background senders do not retry. Ed.Board also drops page reports outside the foreground app and invalidates the prior view on departure. Legacy unordered `/v1/view` reports are not accepted. Pairing remains `/v1/pair` and existing credentials are reusable.
+
+Credentials are refreshed from the shared Mac-local file on focus/heartbeat, even in vaults opened before pairing. Unloading a vault releases only its own view lease and never removes shared credentials; **Disconnect this Mac** explicitly removes the shared companion credential. No vault registration or identifier is used.

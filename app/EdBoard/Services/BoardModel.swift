@@ -8,6 +8,7 @@ import BoardCore
 @MainActor
 final class BoardModel: ObservableObject {
     let firmware = FirmwareUpdater()
+    let obsidianPlugin = ObsidianPlugin()
     private let joystickOverlay = JoystickOverlayController()
     private var joystickGate = JoystickFrameGate()
     private var joystickToken = Int.random(in: 1...0x7fffffff)
@@ -249,6 +250,8 @@ final class BoardModel: ObservableObject {
 
     init() {
         AppLog.shared.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &observers)
+        obsidianPlugin.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &observers)
+        obsidianPlugin.onChange = { [weak self] in self?.configureAutoTimer(); self?.pumpAuto() }
         firmware.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &observers)
         loadConnectionPreference(); refreshPorts(); loadAutoBindings()
         portWatcher = SerialPortWatcher { [weak self] in
@@ -260,7 +263,7 @@ final class BoardModel: ObservableObject {
             Task { @MainActor in self?.updateForeground() }
         }.store(in: &observers)
         center.publisher(for: NSWorkspace.willSleepNotification).sink { [weak self] _ in
-            Task { @MainActor in guard let self else { return }; self.sleeping = true; self.batteryTimer?.invalidate(); self.batteryTimer = nil; self.invalidateJoystick(); self.syncJoystickWatch(); AppLog.shared.event("Mac sleeping"); self.resetPreview(); self.hostExecutor.cancel(); self.hostGate.reset(); self.reconnectWork?.cancel(); self.reconnectWork = nil; self.autoTimer?.invalidate(); self.autoTimer = nil
+            Task { @MainActor in guard let self else { return }; self.sleeping = true; self.obsidianPlugin.clearTransientState(); self.batteryTimer?.invalidate(); self.batteryTimer = nil; self.invalidateJoystick(); self.syncJoystickWatch(); AppLog.shared.event("Mac sleeping"); self.resetPreview(); self.hostExecutor.cancel(); self.hostGate.reset(); self.reconnectWork?.cancel(); self.reconnectWork = nil; self.autoTimer?.invalidate(); self.autoTimer = nil
                 if let activity = self.automaticActivity { ProcessInfo.processInfo.endActivity(activity); self.automaticActivity = nil } }
         }.store(in: &observers)
         center.publisher(for: NSWorkspace.didWakeNotification).sink { [weak self] _ in
@@ -815,6 +818,11 @@ extension BoardModel {
             }
         }
     }
+    private var hasObsidianRules: Bool {
+        guard obsidianPlugin.enabled, let serial = info?.serial, let config = snapshot?.config else { return false }
+        let mapping = obsidianPlugin.mapping(serial: serial)
+        return config.layers.contains { $0.id == mapping.defaultLayer || $0.id == mapping.excalidrawLayer }
+    }
     private var hasAutoRules: Bool {
         guard settingsReadable, let serial = info?.serial, let config = snapshot?.config else { return false }
         let ids = Set(config.layers.map(\.id))
@@ -823,11 +831,12 @@ extension BoardModel {
     private func updateForeground() {
         let app = NSWorkspace.shared.frontmostApplication
         foregroundID = app?.bundleIdentifier; foregroundName = app?.localizedName ?? "Unknown application"
+        obsidianPlugin.setForeground(foregroundID == "md.obsidian")
         pumpAuto()
     }
     private func configureAutoTimer() {
         configureBatteryTimer()
-        guard connected, !sleeping, settingsReadable, snapshot != nil, hasAutoRules || hasHostActions || lastAutoLayer > 0 else {
+        guard connected, !sleeping, settingsReadable, snapshot != nil, hasAutoRules || hasObsidianRules || hasHostActions || lastAutoLayer > 0 else {
             autoTimer?.invalidate(); autoTimer = nil
             if let activity = automaticActivity { ProcessInfo.processInfo.endActivity(activity); automaticActivity = nil }
             return
@@ -840,15 +849,16 @@ extension BoardModel {
     }
     private func pumpAuto() {
         guard connected, !sleeping, !pairingBusy, pending == nil, let info, let snapshot, settingsReadable else { return }
-        let desired = autoBindings.matchingLayer(serial: info.serial, bundleID: foregroundID,
-                                                available: Set(snapshot.config.layers.map(\.id)))
+        let available = Set(snapshot.config.layers.map(\.id))
+        let desired = obsidianPlugin.matchingLayer(serial: info.serial, bundleID: foregroundID, available: available)
+            ?? autoBindings.matchingLayer(serial: info.serial, bundleID: foregroundID, available: available)
         if (desired > 0 || hasHostActions) && automaticActivity == nil {
             automaticActivity = ProcessInfo.processInfo.beginActivity(options: .userInitiatedAllowingIdleSystemSleep, reason: "Maintain keyboard auto-layer lease")
         } else if desired == 0 && !hasHostActions, let activity = automaticActivity {
             ProcessInfo.processInfo.endActivity(activity); automaticActivity = nil
         }
         if autoSession == 0 {
-            guard hasAutoRules || hasHostActions, Date().timeIntervalSince(lastAutoSent) >= 2 else { return }
+            guard hasAutoRules || hasObsidianRules || hasHostActions, Date().timeIntervalSince(lastAutoSent) >= 2 else { return }
             lastAutoSent = Date(); request("runtime.begin", params: EmptyParams()); return
         }
         guard desired != lastAutoLayer || ((desired != 0 || hasHostActions) && Date().timeIntervalSince(lastAutoSent) >= 1.8) else {
